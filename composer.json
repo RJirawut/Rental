@@ -1,0 +1,14 @@
+{
+    "name": "rental/report-system",
+    "description": "Rental Management System with Excel Reports",
+    "type": "project",
+    "require": {
+        "phpoffice/phpspreadsheet": "^1.28",
+        "phpmailer/phpmailer": "^7.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "includes/"
+        }
+    }
+}
