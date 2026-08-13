@@ -12,6 +12,8 @@ $search = $_GET['search'] ?? '';
 $statusFilter = $_GET['status'] ?? '';
 $typeFilter = $_GET['type'] ?? '';
 $floorFilter = $_GET['floor'] ?? '';
+$itemsPerPage = 50;
+$requestedPage = max(1, (int)($_GET['page'] ?? 1));
 
 syncRoomStatuses();
 
@@ -25,7 +27,8 @@ if (empty($floorFilter) && !empty($floors)) {
 }
 
 // Build query
-$sql = "SELECT r.*, rt.type_name, rt.type_name_en, rt.price_daily, rt.price_monthly,
+$sql = "SELECT r.id, r.room_number, r.room_type_id, r.floor, r.status, r.notes, r.created_at, r.updated_at,
+        rt.type_name, rt.type_name_en, rt.price_daily, rt.price_monthly,
         (
             SELECT dt.guest_name
             FROM daily_tenants dt
@@ -102,14 +105,53 @@ if ($floorFilter) {
     $params[] = $floorFilter;
 }
 
-$sql .= " ORDER BY r.room_number";
+// Count the filtered result set separately so the status cards and pagination
+// remain accurate without loading every matching room into memory.
+$countSql = "SELECT r.status, COUNT(*) AS total FROM rooms r WHERE 1=1";
+$countParams = [];
+
+if ($search) {
+    $countSql .= " AND r.room_number LIKE ?";
+    $countParams[] = "%$search%";
+}
+
+if ($statusFilter) {
+    $countSql .= " AND r.status = ?";
+    $countParams[] = $statusFilter;
+}
+
+if ($typeFilter) {
+    $countSql .= " AND r.room_type_id = ?";
+    $countParams[] = $typeFilter;
+}
+
+if ($floorFilter) {
+    $countSql .= " AND r.floor = ?";
+    $countParams[] = $floorFilter;
+}
+
+$countSql .= " GROUP BY r.status";
+$countStmt = $pdo->prepare($countSql);
+$countStmt->execute($countParams);
+$roomStatusCounts = [];
+$totalRooms = 0;
+foreach ($countStmt->fetchAll(PDO::FETCH_ASSOC) as $statusRow) {
+    $roomStatusCounts[$statusRow['status']] = (int)$statusRow['total'];
+    $totalRooms += (int)$statusRow['total'];
+}
+
+$totalPages = max(1, (int)ceil($totalRooms / $itemsPerPage));
+$page = min($requestedPage, $totalPages);
+$offset = ($page - 1) * $itemsPerPage;
+
+$sql .= " ORDER BY r.room_number LIMIT {$itemsPerPage} OFFSET {$offset}";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rooms = $stmt->fetchAll();
 
 // Get room types for filter
-$stmt = $pdo->query("SELECT * FROM room_types WHERE is_active = 1 ORDER BY type_name");
+$stmt = $pdo->query("SELECT id, type_name, type_name_en FROM room_types WHERE is_active = 1 ORDER BY type_name");
 $roomTypes = $stmt->fetchAll();
 
 // Handle delete
@@ -142,12 +184,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     exit;
 }
 
-$roomStatusCounts = array_count_values(array_column($rooms, 'status'));
 $availableCount = (int)($roomStatusCounts['available'] ?? 0);
 $reservedCount = (int)($roomStatusCounts['reserved'] ?? 0);
 $occupiedCount = (int)($roomStatusCounts['occupied'] ?? 0);
 $maintenanceCount = (int)($roomStatusCounts['maintenance'] ?? 0);
-$visibleRoomCount = count($rooms);
+$visibleRoomCount = $totalRooms;
 
 include __DIR__ . '/../../includes/header.php';
 ?>
@@ -341,6 +382,39 @@ include __DIR__ . '/../../includes/header.php';
                 <?php endif; ?>
             </tbody>
         </table>
+
+        <?php if ($totalPages > 1): ?>
+        <?php
+        $paginationParams = [];
+        if ($search !== '') $paginationParams['search'] = $search;
+        if ($statusFilter !== '') $paginationParams['status'] = $statusFilter;
+        if ($typeFilter !== '') $paginationParams['type'] = $typeFilter;
+        if ($floorFilter !== '') $paginationParams['floor'] = $floorFilter;
+        ?>
+        <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+            <div class="text-muted">
+                <?php echo t('showing'); ?> <?php echo (($page - 1) * $itemsPerPage) + 1; ?> - <?php echo min($page * $itemsPerPage, $totalRooms); ?> <?php echo t('of'); ?> <?php echo number_format($totalRooms); ?> <?php echo t('records'); ?>
+            </div>
+            <nav aria-label="Page navigation">
+                <ul class="pagination mb-0">
+                    <?php $paginationParams['page'] = max(1, $page - 1); ?>
+                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?<?php echo http_build_query($paginationParams); ?>"><?php echo t('previous'); ?></a>
+                    </li>
+                    <?php for ($paginationPage = max(1, $page - 1); $paginationPage <= min($totalPages, $page + 1); $paginationPage++): ?>
+                        <?php $paginationParams['page'] = $paginationPage; ?>
+                        <li class="page-item <?php echo $paginationPage === $page ? 'active' : ''; ?>">
+                            <a class="page-link" href="?<?php echo http_build_query($paginationParams); ?>"><?php echo $paginationPage; ?></a>
+                        </li>
+                    <?php endfor; ?>
+                    <?php $paginationParams['page'] = min($totalPages, $page + 1); ?>
+                    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?<?php echo http_build_query($paginationParams); ?>"><?php echo t('next'); ?></a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+        <?php endif; ?>
             </div>
         </div>
     </div>

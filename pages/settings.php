@@ -1,4 +1,8 @@
 <?php
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/functions.php';
 
@@ -10,6 +14,7 @@ ensureSmtpColumns();
 ensureDailyPaymentDeadlineHoursColumn();
 ensurePaymentColumns();
 $settings = getSettings();
+$storageUsage = getStorageUsage();
 $currentColor = $settings['primary_color'] ?? '#0d6efd';
 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $currentColor)) {
     $currentColor = '#0d6efd';
@@ -511,6 +516,7 @@ include __DIR__ . '/../includes/header.php';
                         }
                         
                         formData.append('smtp_encryption', form.querySelector('[name="smtp_encryption"]').value);
+                        formData.append('smtp_from_name', form.querySelector('[name="smtp_from_name"]').value);
                         formData.append('_csrf_token', '<?php echo csrfToken(); ?>');
                         
                         fetch('<?php echo BASE_URL; ?>api/test-smtp.php', {
@@ -1297,6 +1303,39 @@ include __DIR__ . '/../includes/header.php';
                         <label class="form-label"><?php echo t('bank_account_name'); ?></label>
                         <input type="text" name="bank_account_name" class="form-control" 
                             value="<?php echo htmlspecialchars($settings['bank_account_name'] ?? ''); ?>">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Storage Usage -->
+        <div class="col-md-12 mb-4">
+            <hr class="my-4">
+            <h5 class="mb-3"><i class="bi bi-hdd me-2"></i><?php echo t('storage_usage'); ?></h5>
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="row align-items-center g-3">
+                        <div class="col-md-5">
+                            <div class="text-muted small"><?php echo t('storage_total_used'); ?></div>
+                            <div class="fs-2 fw-bold text-primary"><?php echo htmlspecialchars($storageUsage['total_display']); ?></div>
+                            <div class="text-muted small"><?php echo t('storage_usage_help'); ?></div>
+                        </div>
+                        <div class="col-md-7">
+                            <div class="row g-3">
+                                <div class="col-sm-6">
+                                    <div class="border rounded p-3 h-100">
+                                        <div class="text-muted small"><i class="bi bi-database me-1"></i><?php echo t('storage_database'); ?></div>
+                                        <div class="fw-semibold"><?php echo htmlspecialchars($storageUsage['database_display']); ?></div>
+                                    </div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="border rounded p-3 h-100">
+                                        <div class="text-muted small"><i class="bi bi-images me-1"></i><?php echo t('storage_uploaded_files'); ?></div>
+                                        <div class="fw-semibold"><?php echo htmlspecialchars($storageUsage['uploaded_files_display']); ?></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

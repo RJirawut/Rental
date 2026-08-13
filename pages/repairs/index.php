@@ -131,12 +131,12 @@ $where = "1=1";
 $params = [];
 
 if ($statusFilter !== 'all' && in_array($statusFilter, ['pending', 'in_progress', 'completed', 'cancelled'], true)) {
-    $where .= " AND status = ?";
+    $where .= " AND rr.status = ?";
     $params[] = $statusFilter;
 }
 
 if ($search !== '') {
-    $where .= " AND (ticket_number LIKE ? OR room_number LIKE ? OR reporter_name LIKE ? OR phone LIKE ? OR title LIKE ?)";
+    $where .= " AND (rr.ticket_number LIKE ? OR rr.room_number LIKE ? OR rr.reporter_name LIKE ? OR rr.phone LIKE ? OR rr.title LIKE ?)";
     $params[] = "%{$search}%";
     $params[] = "%{$search}%";
     $params[] = "%{$search}%";
@@ -145,26 +145,38 @@ if ($search !== '') {
 }
 
 // Count total
-$stmtCount = $pdo->prepare("SELECT COUNT(*) FROM repair_requests WHERE $where");
+$stmtCount = $pdo->prepare("SELECT COUNT(*) FROM repair_requests rr WHERE $where");
 $stmtCount->execute($params);
 $totalRecords = (int)$stmtCount->fetchColumn();
 $totalPages = max(1, (int)ceil($totalRecords / $limit));
 $page = min($page, $totalPages);
 
 if ($sortBy === 'created_at' && !isset($_GET['sort_by'])) {
-    $orderBy = "ORDER BY CASE status 
+    $orderBy = "ORDER BY CASE rr.status
         WHEN 'pending' THEN 1 
         WHEN 'in_progress' THEN 2 
         WHEN 'completed' THEN 3 
         WHEN 'cancelled' THEN 4 
-    END, created_at DESC";
+    END, rr.created_at DESC";
 } else {
-    $orderBy = "ORDER BY $sortBy $sortOrder";
+    $orderBy = "ORDER BY rr.$sortBy $sortOrder";
 }
 
 // Fetch records
 $stmt = $pdo->prepare("
-    SELECT * FROM repair_requests
+    SELECT rr.*, latest_user.username AS operator_name
+    FROM repair_requests rr
+    LEFT JOIN (
+        SELECT al.entity_id, al.user_id
+        FROM activity_logs al
+        INNER JOIN (
+            SELECT entity_id, MAX(id) AS latest_id
+            FROM activity_logs
+            WHERE entity_type = 'repair_requests'
+            GROUP BY entity_id
+        ) latest_activity ON latest_activity.latest_id = al.id
+    ) latest_repair_activity ON latest_repair_activity.entity_id = rr.id
+    LEFT JOIN users latest_user ON latest_user.id = latest_repair_activity.user_id
     WHERE $where
     $orderBy
     LIMIT $limit OFFSET $offset
@@ -188,6 +200,65 @@ $publicUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
 
 include __DIR__ . '/../../includes/header.php';
 ?>
+
+<style>
+@media (max-width: 767.98px) {
+    .stat-cards-scroll {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        gap: 0.35rem;
+        padding-bottom: 0.4rem;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .stat-cards-scroll::-webkit-scrollbar { display: none; }
+    .stat-cards-scroll .stat-card-item {
+        flex: 0 0 auto;
+        min-width: 135px;
+        width: calc(38% - 0.35rem);
+    }
+    .stat-cards-scroll .card-body {
+        padding: 0.45rem 0.3rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+    .stat-cards-scroll .repair-stat-card {
+        min-height: 78px;
+    }
+    .stat-cards-scroll .card-body .d-flex {
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+    }
+    .stat-cards-scroll .card-body .d-flex > div:first-child {
+        width: 100%;
+        text-align: center;
+    }
+    .stat-cards-scroll .card-body .repair-stat-label {
+        font-size: 0.7rem;
+        line-height: 1.25;
+        margin-bottom: 0.2rem;
+        word-break: break-word;
+        white-space: normal;
+    }
+    .stat-cards-scroll .card-body .repair-stat-value {
+        font-size: 0.9rem;
+        line-height: 1;
+        margin-bottom: 0;
+        white-space: nowrap;
+        text-align: center;
+    }
+    .stat-cards-scroll .card-body .repair-stat-icon { display: none; }
+}
+@media (min-width: 768px) {
+    .stat-cards-scroll { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+    .stat-cards-scroll .stat-card-item { flex: 1 1 0; min-width: 0; }
+}
+</style>
 
 <div class="content-wrapper repair-page">
     <div class="card repair-hero mb-4 border-0 shadow-sm">
@@ -214,8 +285,8 @@ include __DIR__ . '/../../includes/header.php';
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-sm-6 col-xl-3">
+    <div class="stat-cards-scroll mb-4">
+        <div class="stat-card-item">
             <div class="card repair-stat-card repair-stat-pending h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start">
@@ -228,7 +299,7 @@ include __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card-item">
             <div class="card repair-stat-card repair-stat-progress h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start">
@@ -241,7 +312,7 @@ include __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card-item">
             <div class="card repair-stat-card repair-stat-completed h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start">
@@ -254,7 +325,7 @@ include __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card-item">
             <div class="card repair-stat-card repair-stat-cancelled h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start">
@@ -305,60 +376,62 @@ include __DIR__ . '/../../includes/header.php';
                 <table class="table table-hover align-middle repair-table">
                     <thead class="table-light">
                         <tr>
-                            <th class="text-center" style="width: 130px;">
+                            <th class="text-center">#</th>
+                            <th class="text-center text-nowrap">
                                 <a href="<?php echo buildSortUrl('ticket_number', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('repair_id'); ?><?php echo getSortIcon('ticket_number', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th class="text-center" style="width: 90px;">
+                            <th class="text-center text-nowrap">
                                 <a href="<?php echo buildSortUrl('room_number', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('room'); ?><?php echo getSortIcon('room_number', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th style="white-space: nowrap;">
+                            <th class="text-nowrap">
                                 <a href="<?php echo buildSortUrl('reporter_name', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('reporter'); ?><?php echo getSortIcon('reporter_name', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th class="text-center" style="white-space: nowrap;">
+                            <th class="text-center text-nowrap">
                                 <a href="<?php echo buildSortUrl('phone', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('phone'); ?><?php echo getSortIcon('phone', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th style="min-width: 140px;">
+                            <th class="text-nowrap">
                                 <a href="<?php echo buildSortUrl('title', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('issue'); ?><?php echo getSortIcon('title', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th class="text-center" style="width: 135px; white-space: nowrap;">
+                            <th class="text-center text-nowrap">
                                 <a href="<?php echo buildSortUrl('priority', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('urgency'); ?><?php echo getSortIcon('priority', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th class="text-center" style="width: 95px; white-space: nowrap;">
+                            <th class="text-center text-nowrap">
                                 <a href="<?php echo buildSortUrl('status', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('status'); ?><?php echo getSortIcon('status', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th class="text-center" style="width: 120px;">
+                            <th class="text-center text-nowrap">
                                 <a href="<?php echo buildSortUrl('created_at', $sortBy, $sortOrder, $search, $statusFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('report_date'); ?><?php echo getSortIcon('created_at', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
-                            <th class="text-center" style="width: 130px;"><?php echo t('actions'); ?></th>
+                            <th class="text-center text-nowrap"><?php echo t('actions'); ?></th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($repairs)): ?>
                             <tr>
-                                <td colspan="9" class="text-center py-5 text-muted">
+                                <td colspan="10" class="text-center py-5 text-muted">
                                     <i class="bi bi-tools fs-1"></i>
                                     <p class="mt-2 mb-0"><?php echo t('no_repair_requests'); ?></p>
                                 </td>
                             </tr>
                         <?php else: ?>
-                            <?php foreach ($repairs as $r): ?>
+                            <?php foreach ($repairs as $index => $r): ?>
                                 <tr>
+                                    <td class="text-center fw-bold text-muted px-2" style="width: 1%; white-space: nowrap;"><?php echo $offset + $index + 1; ?></td>
                                     <td class="text-center">
                                         <span class="font-monospace fw-bold"><?php echo htmlspecialchars($r['ticket_number']); ?></span>
                                     </td>
@@ -400,6 +473,9 @@ include __DIR__ . '/../../includes/header.php';
                                             echo '<span class="badge bg-success">' . t('status_completed') . '</span>';
                                         } elseif ($r['status'] === 'cancelled') {
                                             echo '<span class="badge bg-secondary">' . t('status_cancelled') . '</span>';
+                                        }
+                                        if (!empty($r['operator_name'])) {
+                                            echo '<div class="small text-muted mt-1" style="font-size: 0.75rem;">' . t('by') . ': ' . htmlspecialchars($r['operator_name']) . '</div>';
                                         }
                                         ?>
                                     </td>
@@ -485,24 +561,12 @@ include __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
 
-            <!-- Pagination -->
-            <?php if ($totalPages > 1): ?>
-                <nav class="mt-4">
-                    <ul class="pagination justify-content-center mb-0">
-                        <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?status=<?php echo urlencode($statusFilter); ?>&search=<?php echo urlencode($search); ?>&page=<?php echo $page - 1; ?>"><?php echo t('previous_page'); ?></a>
-                        </li>
-                        <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                            <li class="page-item <?php echo $page === $i ? 'active' : ''; ?>">
-                                <a class="page-link" href="?status=<?php echo urlencode($statusFilter); ?>&search=<?php echo urlencode($search); ?>&page=<?php echo $i; ?>"><?php echo $i; ?></a>
-                            </li>
-                        <?php endfor; ?>
-                        <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?status=<?php echo urlencode($statusFilter); ?>&search=<?php echo urlencode($search); ?>&page=<?php echo $page + 1; ?>"><?php echo t('next_page'); ?></a>
-                        </li>
-                    </ul>
-                </nav>
-            <?php endif; ?>
+            <?php renderUnifiedPagination($page, $totalPages, (int)$totalRecords, $limit, [
+                'status' => $statusFilter,
+                'search' => $search,
+                'sort_by' => $sortBy,
+                'sort_order' => $sortOrder,
+            ], t('repairs')); ?>
         </div>
     </div>
 </div>

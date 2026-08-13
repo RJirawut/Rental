@@ -107,6 +107,7 @@ if ($invoice['tenant_type'] === 'monthly') {
 } else {
     $utilityBillNotes = '';
 }
+$paymentInstruction = buildPaymentInstructionText($settings, $lang, $invoice['tenant_type'] ?? 'monthly');
 ?>
 <!DOCTYPE html>
 <html lang="<?php echo $lang; ?>">
@@ -117,6 +118,14 @@ if ($invoice['tenant_type'] === 'monthly') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { font-family: 'Sarabun', sans-serif; }
+        .qr-code-grid { margin-bottom: 0 !important; }
+        .qr-code-grid > [class*="col-"] { display: flex; }
+        .qr-card { background-color: #f8f9fa; border-radius: 12px; padding: 18px 14px; width: 100%; height: auto; min-height: 0; display: flex; flex-direction: column; align-items: center; text-align: center; box-sizing: border-box; }
+        .qr-card > p:first-child { display: flex; align-items: flex-start; justify-content: center; width: 100%; min-height: 20px; margin-bottom: 0 !important; font-size: 14px; font-weight: 600; line-height: 1.35; color: #2d3748; }
+        .qr-image-slot { display: flex; align-items: flex-start; justify-content: center; width: 100%; height: 80px; flex: 0 0 80px; }
+        .qr-image-slot img { width: 80px; height: 80px; background-color: #fff; padding: 8px; border-radius: 8px; box-sizing: border-box; }
+        .qr-payment-details { margin-top: 8px; }
+        .qr-card-caption { min-height: 32px; margin-top: 8px !important; color: #718096; font-size: 12px; line-height: 1.4; }
         @media print {
             .no-print { display: none; }
             body { margin: 0; padding: 20px; }
@@ -208,8 +217,22 @@ if ($invoice['tenant_type'] === 'monthly') {
                     <td class="text-end"><?php echo formatCurrency($item['total_price']); ?></td>
                 </tr>
                 <?php endforeach; ?>
+                <?php if (!empty($outstandingBills)): ?>
+                <?php foreach ($outstandingBills as $ob): ?>
+                <tr class="table-danger">
+                    <td>
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <?php echo $lang === 'en' ? 'Outstanding' : 'ค้างชำระ'; ?> - <?php echo formatBillMonth($ob['bill_month'], $lang); ?>
+                    </td>
+                    <td class="text-center">1 <?php echo t('invoice_month_unit'); ?></td>
+                    <td class="text-end"><?php echo formatCurrency($ob['total_amount']); ?></td>
+                    <td class="text-end"><?php echo formatCurrency($ob['total_amount']); ?></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php endif; ?>
             </tbody>
             <tfoot>
+                <?php if (empty($outstandingBills)): ?>
                 <tr>
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_subtotal'); ?></strong></td>
                     <td class="text-end"><?php echo formatCurrency($subtotal); ?></td>
@@ -230,72 +253,44 @@ if ($invoice['tenant_type'] === 'monthly') {
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_grand_total'); ?></strong></td>
                     <td class="text-end"><strong><?php echo formatCurrency($grandTotal); ?></strong></td>
                 </tr>
+                <?php else: ?>
+                <tr class="table-primary">
+                    <td colspan="3" class="text-end"><strong><?php echo $lang === 'en' ? 'Total Amount Due' : 'ยอดที่ต้องชำระทั้งหมด'; ?></strong></td>
+                    <td class="text-end"><strong><?php echo formatCurrency($grandTotal + $totalOutstanding); ?></strong></td>
+                </tr>
+                <?php endif; ?>
             </tfoot>
         </table>
-
-        <?php if (!empty($outstandingBills)): ?>
-        <div class="alert alert-danger py-2 mb-3 mt-3">
-            <strong><i class="bi bi-exclamation-triangle me-2"></i><?php echo $lang === 'en' ? 'Outstanding Balance' : 'ยอดค้างชำระ'; ?></strong>
-        </div>
-        <table class="table table-bordered">
-            <thead class="table-light">
-                <tr>
-                    <th><?php echo t('invoice_item'); ?></th>
-                    <th class="text-center"><?php echo t('invoice_qty'); ?></th>
-                    <th class="text-end"><?php echo t('invoice_price'); ?></th>
-                    <th class="text-end"><?php echo t('invoice_amount'); ?></th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($outstandingBills as $ob): ?>
-                <tr>
-                    <td>
-                        <i class="bi bi-exclamation-triangle"></i>
-                        <?php echo $lang === 'en' ? 'Outstanding' : 'ค้างชำระ'; ?> - <?php echo formatBillMonth($ob['bill_month'], $lang); ?>
-                    </td>
-                    <td class="text-center">1 <?php echo t('invoice_month_unit'); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($ob['total_amount']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($ob['total_amount']); ?></td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-            <tfoot>
-                <tr class="table-danger">
-                    <td colspan="3" class="text-end"><strong><?php echo $lang === 'en' ? 'Total Outstanding' : 'ยอดค้างชำระทั้งหมด'; ?></strong></td>
-                    <td class="text-end fw-bold"><?php echo formatCurrency($totalOutstanding); ?></td>
-                </tr>
-            </tfoot>
-        </table>
-        <div class="alert alert-primary py-2 mb-3">
-            <strong><?php echo $lang === 'en' ? 'Total Amount Due' : 'ยอดที่ต้องชำระทั้งหมด'; ?>: <?php echo formatCurrency($grandTotal + $totalOutstanding); ?></strong>
-        </div>
-        <?php endif; ?>
 
         <!-- QR Codes Section -->
-        <div class="row align-items-stretch">
-            <div class="col-6 text-center h-100">
+        <div class="row align-items-stretch mb-4 qr-code-grid">
+            <div class="col-4 text-center">
                 <?php if (!empty($settings['promptpay_id'])): ?>
                     <?php
-                    $paymentUrl = '';
-                    if ($invoice) {
-                        ensurePaymentTokenColumn();
-                        $token = getOrCreatePaymentToken((int)$invoice['id']);
-                        $paymentUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment.php?token=' . $token);
-                    }
-                    $qrBlock = buildPaymentQRBlockHtml($settings, $grandTotal, $paymentUrl);
-                    echo $qrBlock;
+                    echo buildPaymentQRBlockHtml($settings, $grandTotal);
                     ?>
                 <?php endif; ?>
             </div>
-            <div class="col-6 text-center h-100">
+            <div class="col-4 text-center">
+                <?php
+                $paymentNoticeUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment-notice.php');
+                $paymentNoticeQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($paymentNoticeUrl);
+                ?>
+                <div class="qr-card">
+                    <p style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px;">💳 <?php echo $lang === 'en' ? 'Payment Confirmation' : 'แจ้งชำระเงิน'; ?></p>
+                    <div class="qr-image-slot"><img src="<?php echo $paymentNoticeQrUrl; ?>" alt="Payment Confirmation QR"></div>
+                    <p style="color: #718096; font-size: 12px; margin-top: 8px; margin-bottom: 0;"><?php echo $lang === 'en' ? 'Scan to submit payment slip' : 'สแกนเพื่อแจ้งชำระเงิน'; ?></p>
+                </div>
+            </div>
+            <div class="col-4 text-center">
                 <?php
                 $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
                 $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
                 ?>
-                <div style="background-color: #f8f9fa; border-radius: 12px; padding: 25px; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-                    <p style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px;">🔧 แจ้งซ่อมห้องพัก</p>
-                    <img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR" width="80" height="80" style="background-color: #fff; padding: 8px; border-radius: 8px;">
-                    <p style="color: #718096; font-size: 12px; margin-top: 8px; margin-bottom: 0;">สแกนเพื่อแจ้งซ่อม</p>
+                <div class="qr-card">
+                    <p style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px;">🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
+                    <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
+                    <p style="color: #718096; font-size: 12px; margin-top: 8px; margin-bottom: 0;"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
                 </div>
             </div>
         </div>
@@ -307,6 +302,7 @@ if ($invoice['tenant_type'] === 'monthly') {
                 <li><?php echo nl2br(htmlspecialchars($utilityBillNotes)); ?></li>
                 <?php endif; ?>
                 <li>
+                    <?php echo htmlspecialchars($paymentInstruction, ENT_QUOTES, 'UTF-8'); ?><br>
                     <?php echo t('invoice_note_text'); ?><br>
                     <?php echo t('invoice_keep_receipt'); ?>
                 </li>

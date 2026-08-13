@@ -22,9 +22,12 @@ requireValidCsrfToken();
 // Verify admin access
 requireAdmin();
 
-// Verify PIN if provided
+// Verify PIN if PIN system is enabled
+$settings = getSettings();
+$hasPin = !empty($settings['pin']);
 $pin = trim($_POST['pin'] ?? '');
-if (!empty($pin)) {
+
+if ($hasPin) {
     $pinResult = verifySystemPin($pin);
     if (empty($pinResult['success'])) {
         echo json_encode([
@@ -58,13 +61,13 @@ try {
 
         echo json_encode([
             'success' => true,
-            'message' => "Cleared {$deletedCount} emails older than 90 days",
+            'message' => sprintf(t('cleared_old_emails_success'), $deletedCount),
             'deleted_count' => $deletedCount
         ]);
     } else {
         echo json_encode([
             'success' => true,
-            'message' => 'No emails older than 90 days found',
+            'message' => t('no_old_emails_found'),
             'deleted_count' => 0
         ]);
     }

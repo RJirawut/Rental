@@ -419,6 +419,35 @@ $currentUser = getCurrentUser();
             font-weight: bold;
             font-size: 14px;
         }
+        .user-dropdown-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            cursor: pointer;
+        }
+        .user-dropdown-toggle:focus-visible {
+            outline: 2px solid rgba(255, 255, 255, 0.9);
+            outline-offset: 3px;
+            border-radius: 50%;
+        }
+        .user-menu .dropdown {
+            position: relative;
+        }
+        .user-dropdown-menu {
+            right: 0;
+            left: auto;
+            min-width: 12rem;
+            max-width: calc(100vw - 1rem);
+            z-index: 1050;
+        }
+        .user-dropdown-menu .dropdown-header {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
         .content-wrapper {
             background: white;
             border-radius: 15px;
@@ -526,7 +555,7 @@ $currentUser = getCurrentUser();
         </button>
         
         <div class="sidebar-logo">
-            <?php 
+            <?php
             // Debug: แสดงข้อมูลโลโก้
             $logoPath = !empty($settings['logo']) ? BASE_URL . 'assets/images/logo/' . $settings['logo'] : '';
             ?>
@@ -572,6 +601,20 @@ $currentUser = getCurrentUser();
                 <i class="bi bi-receipt"></i> <?php echo !empty($settings['tax_id']) ? t('tax_invoice') : t('receipt'); ?>
             </a>
             <?php 
+            $pendingPayments = 0;
+            try {
+                if (function_exists('getPendingPaymentConfirmationsCount')) {
+                    $pendingPayments = getPendingPaymentConfirmationsCount();
+                }
+            } catch (Exception $e) {}
+            ?>
+            <a class="nav-link <?php echo strpos($_SERVER['PHP_SELF'], '/payment-confirmations/') !== false ? 'active' : ''; ?>" href="<?php echo BASE_URL; ?>pages/payment-confirmations/index.php">
+                <i class="bi bi-credit-card-2-front"></i> <?php echo t('payment_confirmations'); ?>
+                <?php if ($pendingPayments > 0): ?>
+                <span class="badge bg-warning text-dark ms-auto"><?php echo $pendingPayments; ?></span>
+                <?php endif; ?>
+            </a>
+            <?php
             $pendingRepairs = 0;
             try {
                 ensureRepairRequestsTable();
@@ -624,10 +667,10 @@ $currentUser = getCurrentUser();
                 <a href="?lang=en" class="btn btn-sm <?php echo $lang == 'en' ? 'btn-primary' : 'btn-outline-secondary'; ?>">EN</a>
                 
                 <div class="dropdown">
-                    <a href="#" class="dropdown-toggle" data-bs-toggle="dropdown">
+                    <button type="button" class="dropdown-toggle user-dropdown-toggle" id="userMenuToggle" aria-expanded="false" aria-controls="userMenuDropdown" aria-label="User menu">
                         <div class="user-avatar"><?php echo mb_strtoupper(mb_substr($currentUser['full_name'] ?? $_SESSION['full_name'] ?? 'U', 0, 1, 'UTF-8'), 'UTF-8'); ?></div>
-                    </a>
-                    <ul class="dropdown-menu dropdown-menu-end">
+                    </button>
+                    <ul class="dropdown-menu user-dropdown-menu" id="userMenuDropdown" aria-labelledby="userMenuToggle">
                         <li class="dropdown-header text-center">
                             <strong><?php echo htmlspecialchars($currentUser['full_name'] ?? $_SESSION['full_name'] ?? 'User', ENT_QUOTES, 'UTF-8'); ?></strong>
                         </li>
@@ -639,13 +682,66 @@ $currentUser = getCurrentUser();
                 </div>
             </div>
         </div>
+
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const userMenuToggle = document.getElementById('userMenuToggle');
+            const userMenuDropdown = document.getElementById('userMenuDropdown');
+
+            if (!userMenuToggle || !userMenuDropdown) {
+                return;
+            }
+
+            const closeUserMenu = function() {
+                userMenuDropdown.classList.remove('show');
+                userMenuToggle.setAttribute('aria-expanded', 'false');
+            };
+
+            const positionUserMenu = function() {
+                const margin = 8;
+                const toggleRect = userMenuToggle.getBoundingClientRect();
+                const menuWidth = userMenuDropdown.getBoundingClientRect().width;
+                const canAlignRight = toggleRect.right - menuWidth >= margin;
+
+                userMenuDropdown.style.right = canAlignRight ? '0' : 'auto';
+                userMenuDropdown.style.left = canAlignRight ? 'auto' : '0';
+            };
+
+            userMenuToggle.addEventListener('click', function(event) {
+                event.stopPropagation();
+                const isOpen = userMenuDropdown.classList.toggle('show');
+                userMenuToggle.setAttribute('aria-expanded', String(isOpen));
+
+                if (isOpen) {
+                    positionUserMenu();
+                }
+            });
+
+            userMenuDropdown.addEventListener('click', function(event) {
+                event.stopPropagation();
+            });
+
+            document.addEventListener('click', closeUserMenu);
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    closeUserMenu();
+                    userMenuToggle.focus();
+                }
+            });
+            window.addEventListener('resize', function() {
+                if (userMenuDropdown.classList.contains('show')) {
+                    positionUserMenu();
+                }
+            });
+        });
+        </script>
         
         <?php if ($flash): ?>
         <script>
         document.addEventListener('DOMContentLoaded', function() {
             Swal.fire({
-                icon: '<?php echo htmlspecialchars($flash['type'] === 'danger' ? 'error' : ($flash['type'] === 'warning' ? 'warning' : ($flash['type'] === 'info' ? 'info' : 'success'))); ?>',
-                title: '<?php echo htmlspecialchars($flash['type'] === 'danger' ? t('error') : ($flash['type'] === 'warning' ? t('warning') : ($flash['type'] === 'info' ? t('info') : t('success')))); ?>',
+                icon: '<?php echo htmlspecialchars(in_array($flash['type'], ['danger', 'error'], true) ? 'error' : ($flash['type'] === 'warning' ? 'warning' : ($flash['type'] === 'info' ? 'info' : 'success'))); ?>',
+                title: '<?php echo htmlspecialchars(in_array($flash['type'], ['danger', 'error'], true) ? t('error') : ($flash['type'] === 'warning' ? t('warning') : ($flash['type'] === 'info' ? t('info') : t('success')))); ?>',
                 text: '<?php echo htmlspecialchars($flash['message']); ?>',
                 confirmButtonColor: 'var(--primary-color, #0d6efd)',
                 timer: 3500,

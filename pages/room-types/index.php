@@ -9,6 +9,9 @@ mb_internal_encoding('UTF-8');
 requireLogin();
 
 $pageTitle = t('room_types');
+$search = trim($_GET['search'] ?? '');
+$itemsPerPage = 50;
+$requestedPage = max(1, (int)($_GET['page'] ?? 1));
 
 // Handle delete
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
@@ -32,13 +35,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         }
     }
     
-    header('Location: ' . $_SERVER['PHP_SELF']);
+    $redirectQuery = $_GET;
+    unset($redirectQuery['page']);
+    header('Location: ' . $_SERVER['PHP_SELF'] . (!empty($redirectQuery) ? '?' . http_build_query($redirectQuery) : ''));
     exit;
 }
 
-// Get room types
-$stmt = $pdo->query("
-    SELECT rt.*,
+// Search and paginate room types to keep the catalog lightweight as it grows.
+$whereSql = '';
+$queryParams = [];
+if ($search !== '') {
+    $whereSql = "WHERE (rt.type_name LIKE ? OR rt.type_name_en LIKE ? OR rt.description LIKE ? OR rt.description_en LIKE ?)";
+    $searchValue = "%{$search}%";
+    $queryParams = [$searchValue, $searchValue, $searchValue, $searchValue];
+}
+
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM room_types rt {$whereSql}");
+$countStmt->execute($queryParams);
+$totalRoomTypes = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRoomTypes / $itemsPerPage));
+$page = min($requestedPage, $totalPages);
+$offset = ($page - 1) * $itemsPerPage;
+
+$stmt = $pdo->prepare("
+    SELECT rt.id, rt.type_name, rt.type_name_en, rt.price_daily, rt.price_monthly,
+           rt.description, rt.description_en,
            COALESCE(al_user.username, default_admin.username) AS creator_username
     FROM room_types rt
     LEFT JOIN (
@@ -55,8 +76,11 @@ $stmt = $pdo->query("
     LEFT JOIN (
         SELECT username FROM users WHERE is_active = 1 AND role = 'admin' ORDER BY id ASC LIMIT 1
     ) default_admin ON 1=1
+    {$whereSql}
     ORDER BY rt.id ASC
+    LIMIT {$itemsPerPage} OFFSET {$offset}
 ");
+$stmt->execute($queryParams);
 $roomTypes = $stmt->fetchAll();
 
 include __DIR__ . '/../../includes/header.php';
@@ -67,11 +91,32 @@ include __DIR__ . '/../../includes/header.php';
         <h5 class="mb-0 me-3"><i class="bi bi-layers me-2"></i><?php echo t('room_types'); ?></h5>
         <div class="d-flex flex-wrap align-items-center justify-content-end gap-2 ms-auto">
             <span class="badge text-bg-light border rounded-pill px-3 py-2 text-dark">
-                <?php echo t('all'); ?> <?php echo number_format(count($roomTypes)); ?>
+                <?php echo t('all'); ?> <?php echo number_format($totalRoomTypes); ?>
             </span>
             <a href="form.php" class="btn btn-primary flex-shrink-0 d-flex align-items-center">
                 <i class="bi bi-plus-circle me-3"></i><?php echo t('add_new'); ?>
             </a>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="GET" action="" class="row g-2">
+                <div class="col-12 col-md-8 col-lg-6">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" name="search" class="form-control" value="<?php echo htmlspecialchars($search); ?>" placeholder="<?php echo t('search'); ?> <?php echo t('room_type'); ?>">
+                    </div>
+                </div>
+                <div class="col-12 col-md-auto">
+                    <button type="submit" class="btn btn-outline-primary w-100"><?php echo t('search'); ?></button>
+                </div>
+                <?php if ($search !== ''): ?>
+                <div class="col-12 col-md-auto">
+                    <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="btn btn-outline-secondary w-100"><?php echo t('clear'); ?></a>
+                </div>
+                <?php endif; ?>
+            </form>
         </div>
     </div>
 
@@ -153,6 +198,33 @@ include __DIR__ . '/../../includes/header.php';
                 <?php endif; ?>
             </tbody>
         </table>
+
+        <?php if ($totalPages > 1): ?>
+        <?php $paginationParams = $search !== '' ? ['search' => $search] : []; ?>
+        <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+            <div class="text-muted">
+                <?php echo t('showing'); ?> <?php echo (($page - 1) * $itemsPerPage) + 1; ?> - <?php echo min($page * $itemsPerPage, $totalRoomTypes); ?> <?php echo t('of'); ?> <?php echo number_format($totalRoomTypes); ?> <?php echo t('records'); ?>
+            </div>
+            <nav aria-label="Page navigation">
+                <ul class="pagination mb-0">
+                    <?php $paginationParams['page'] = max(1, $page - 1); ?>
+                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?<?php echo http_build_query($paginationParams); ?>"><?php echo t('previous'); ?></a>
+                    </li>
+                    <?php for ($paginationPage = max(1, $page - 1); $paginationPage <= min($totalPages, $page + 1); $paginationPage++): ?>
+                        <?php $paginationParams['page'] = $paginationPage; ?>
+                        <li class="page-item <?php echo $paginationPage === $page ? 'active' : ''; ?>">
+                            <a class="page-link" href="?<?php echo http_build_query($paginationParams); ?>"><?php echo $paginationPage; ?></a>
+                        </li>
+                    <?php endfor; ?>
+                    <?php $paginationParams['page'] = min($totalPages, $page + 1); ?>
+                    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?<?php echo http_build_query($paginationParams); ?>"><?php echo t('next'); ?></a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 

@@ -128,11 +128,22 @@ function getSortIcon($column, $currentSortBy, $currentSortOrder) {
 
 // Build query
 $sql = "SELECT dt.*, r.room_number, rt.type_name, rt.type_name_en, rt.price_daily,
-               dt_user.username AS dt_created_by_name
+               COALESCE(dt_latest_user.username, dt_creator.username) AS daily_tenant_actor_name
         FROM daily_tenants dt 
         JOIN rooms r ON dt.room_id = r.id 
         JOIN room_types rt ON r.room_type_id = rt.id 
-        LEFT JOIN users dt_user ON dt.created_by = dt_user.id
+        LEFT JOIN users dt_creator ON dt.created_by = dt_creator.id
+        LEFT JOIN (
+            SELECT al.entity_id, al.user_id
+            FROM activity_logs al
+            INNER JOIN (
+                SELECT entity_id, MAX(id) AS latest_id
+                FROM activity_logs
+                WHERE entity_type = 'daily_tenant'
+                GROUP BY entity_id
+            ) latest_activity ON latest_activity.latest_id = al.id
+        ) dt_latest_activity ON dt_latest_activity.entity_id = dt.id
+        LEFT JOIN users dt_latest_user ON dt_latest_activity.user_id = dt_latest_user.id
         WHERE 1=1";
 $params = [];
 
@@ -640,8 +651,8 @@ include __DIR__ . '/../../includes/header.php';
                         <?php endif; ?>
 
                         <?php
-                        if (!empty($tenant['dt_created_by_name'])) {
-                            echo '<div class="small text-muted mt-1" style="font-size: 0.75rem;">' . t('by') . ': ' . htmlspecialchars($tenant['dt_created_by_name']) . '</div>';
+                        if (!empty($tenant['daily_tenant_actor_name'])) {
+                            echo '<div class="small text-muted mt-1" style="font-size: 0.75rem;">' . t('by') . ': ' . htmlspecialchars($tenant['daily_tenant_actor_name']) . '</div>';
                         }
                         ?>
                     </td>
@@ -730,53 +741,14 @@ include __DIR__ . '/../../includes/header.php';
             </tbody>
         </table>
         
-        <!-- Pagination -->
-        <?php if ($totalPages > 1): ?>
-        <div class="d-flex justify-content-between align-items-center mt-3">
-            <div class="text-muted">
-                <?php echo t('showing'); ?> <?php echo (($page - 1) * $itemsPerPage) + 1; ?> - <?php echo min($page * $itemsPerPage, $totalRecords); ?> <?php echo t('of'); ?> <?php echo $totalRecords; ?> <?php echo t('records'); ?>
-            </div>
-            <nav aria-label="Page navigation">
-                <ul class="pagination mb-0">
-                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('previous'); ?></a>
-                    </li>
-
-                    <?php
-                    $startPage = max(1, $page - 1);
-                    $endPage = min($totalPages, $page + 1);
-
-                    if ($totalPages > 3) {
-                        if ($page <= 2) {
-                            $startPage = 1;
-                            $endPage = 3;
-                        } elseif ($page >= $totalPages - 1) {
-                            $startPage = $totalPages - 2;
-                            $endPage = $totalPages;
-                        }
-                    }
-
-                    if ($startPage > 1): ?>
-                    <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif;
-
-                    for ($i = $startPage; $i <= $endPage; $i++): ?>
-                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo $i; ?></a>
-                    </li>
-                    <?php endfor;
-
-                    if ($endPage < $totalPages): ?>
-                    <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif; ?>
-
-                    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('next'); ?></a>
-                    </li>
-                </ul>
-            </nav>
-        </div>
-        <?php endif; ?>
+        <?php renderUnifiedPagination($page, $totalPages, (int)$totalRecords, $itemsPerPage, [
+            'search' => $search,
+            'status' => $statusFilter,
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
+            'sort_by' => $sortBy,
+            'sort_order' => $sortOrder,
+        ], t('daily_tenants')); ?>
     </div>
 </div>
 

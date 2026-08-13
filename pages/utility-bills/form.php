@@ -79,15 +79,17 @@ if (!$id && $preselectedTenant) {
 // Get tenants (active contracts without existing bill, plus preselected tenant if any)
 $tenants = [];
 if ($selectedMonth) {
-    $stmt = $pdo->prepare("SELECT mt.*, r.room_number, rt.price_monthly 
+    $stmt = $pdo->prepare("SELECT mt.id, mt.tenant_name, mt.phone, mt.contract_start, mt.monthly_rent,
+        r.room_number, rt.price_monthly
         FROM monthly_tenants mt 
         JOIN rooms r ON mt.room_id = r.id 
         JOIN room_types rt ON r.room_type_id = rt.id 
         LEFT JOIN utility_bills ub ON mt.id = ub.tenant_id AND ub.bill_month = ?
         WHERE (mt.status = 'active' AND ub.id IS NULL)
         OR mt.id = ?
-        ORDER BY r.room_number");
-    $stmt->execute([$selectedMonth, $preselectedTenant]);
+        ORDER BY CASE WHEN mt.id = ? THEN 0 ELSE 1 END, r.room_number, mt.tenant_name
+        LIMIT 50");
+    $stmt->execute([$selectedMonth, $preselectedTenant, $preselectedTenant]);
     $tenants = $stmt->fetchAll();
 }
 
@@ -340,6 +342,7 @@ include __DIR__ . '/../../includes/header.php';
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label class="form-label"><?php echo t('tenant'); ?> *</label>
+                                <input type="search" id="tenant_search" class="form-control mb-2" placeholder="<?php echo t('search'); ?> <?php echo t('tenant'); ?>, <?php echo t('room'); ?>, <?php echo t('phone'); ?>" autocomplete="off">
                                 <select name="tenant_id" id="tenant_id" class="form-select" required>
                                     <option value=""><?php echo t('select_tenant'); ?></option>
                                     <?php foreach ($tenants as $t): ?>
@@ -622,7 +625,9 @@ function t(key) {
     return translations[key] || key;
 }
 
-function loadTenantsForMonth(month) {
+let tenantSearchTimer = null;
+
+function loadTenantsForMonth(month, searchTerm = '') {
     if (!month) {
         document.getElementById('tenantSection').style.display = 'none';
         document.getElementById('utilitySection').style.display = 'none';
@@ -641,7 +646,7 @@ function loadTenantsForMonth(month) {
     }
     
     // Fetch tenants for selected month
-    const apiUrl = '<?php echo BASE_URL; ?>api/get-tenants-by-month.php?month=' + encodeURIComponent(month);
+    const apiUrl = '<?php echo BASE_URL; ?>api/get-tenants-by-month.php?month=' + encodeURIComponent(month) + '&search=' + encodeURIComponent(searchTerm);
     console.log('Fetching from:', apiUrl);
     
     fetch(apiUrl)
@@ -937,6 +942,7 @@ function validateMeterPair(currentId, previousId, errorKey) {
 
 document.getElementById('bill_month').addEventListener('change', function() {
     const selectedMonth = this.value;
+    document.getElementById('tenant_search').value = '';
     loadTenantsForMonth(selectedMonth);
     
     // Reset tenant selection and utility section
@@ -950,6 +956,13 @@ document.getElementById('bill_month').addEventListener('change', function() {
     clearMeterResetState();
     updatePreviousMeterState();
     calculateUtility();
+});
+
+document.getElementById('tenant_search').addEventListener('input', function() {
+    const month = document.getElementById('bill_month').value;
+    const searchTerm = this.value.trim();
+    clearTimeout(tenantSearchTimer);
+    tenantSearchTimer = setTimeout(() => loadTenantsForMonth(month, searchTerm), 300);
 });
 
 document.getElementById('tenant_id').addEventListener('change', function() {

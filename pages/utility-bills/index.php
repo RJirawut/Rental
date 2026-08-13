@@ -63,21 +63,6 @@ function getSortIcon($column, $currentSortBy, $currentSortOrder) {
         : '<i class="bi bi-arrow-down text-primary small ms-1"></i>';
 }
 
-function buildUtilityBillPageUrl($page, $monthFilter, $tenantFilter, $sortBy, $sortOrder) {
-    $params = [
-        'month' => $monthFilter,
-        'sort_by' => $sortBy,
-        'sort_order' => $sortOrder,
-        'page' => $page,
-    ];
-
-    if ($tenantFilter) {
-        $params['tenant'] = $tenantFilter;
-    }
-
-    return '?' . http_build_query($params);
-}
-
 // Build query - show all utility bills from tenant start date
 $selectFields = "SELECT ub.*, mt.tenant_name, r.room_number, mt.contract_start,
         COALESCE(al_user.username, ub_user.username, default_admin.username) AS creator_username";
@@ -189,14 +174,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'paid') {
     requireValidCsrfToken();
     $id = intval($_POST['id'] ?? 0);
-    $paidAmount = floatval($_POST['amount'] ?? 0);
-    
     $stmt = $pdo->prepare("SELECT tenant_id, bill_month FROM utility_bills WHERE id = ?");
     $stmt->execute([$id]);
     $billRow = $stmt->fetch();
 
-    $stmt = $pdo->prepare("UPDATE utility_bills SET status = 'paid', paid_date = ?, paid_amount = ? WHERE id = ?");
-    if ($stmt->execute([date('Y-m-d'), $paidAmount, $id])) {
+    $stmt = $pdo->prepare("UPDATE utility_bills SET status = 'paid', paid_date = ? WHERE id = ?");
+    if ($stmt->execute([date('Y-m-d'), $id])) {
         if ($billRow) {
             sendMonthlyReceiptEmail((int) $billRow['tenant_id'], $billRow['bill_month'], 'paid');
         }
@@ -389,14 +372,14 @@ include __DIR__ . '/../../includes/header.php';
                     <td style="text-align: center;"><?php echo formatCurrency($bill['elec_amount']); ?></td>
                     <td style="text-align: center;">
                         <?php if ($bill['status'] === 'paid'): ?>
-                        <span class="badge bg-success"><?php echo t('paid'); ?></span>
+                            <span class="badge bg-success"><?php echo t('paid'); ?></span>
                         <?php else: ?>
-                        <span class="badge bg-warning text-dark"><?php echo t('unpaid'); ?></span>
+                            <span class="badge bg-warning text-dark"><?php echo t('unpaid'); ?></span>
                         <?php endif; ?>
                         <?php if (!empty($bill['creator_username'])): ?>
-                        <div class="small text-muted mt-1" style="font-size: 0.75rem;">
-                            <?php echo t('by'); ?>: <?php echo htmlspecialchars($bill['creator_username']); ?>
-                        </div>
+                            <div class="small text-muted mt-1" style="font-size: 0.75rem;">
+                                <?php echo t('by'); ?>: <?php echo htmlspecialchars($bill['creator_username']); ?>
+                            </div>
                         <?php endif; ?>
                     </td>
                     <td style="text-align: center;">
@@ -430,59 +413,12 @@ include __DIR__ . '/../../includes/header.php';
         </table>
     </div>
 
-    <?php if ($totalPages > 1): ?>
-    <div class="d-flex justify-content-between align-items-center mt-4 flex-wrap">
-        <div class="text-muted mb-2 mb-md-0">
-            <?php echo (($page - 1) * $itemsPerPage) + 1; ?> - <?php echo min($page * $itemsPerPage, $totalRecords); ?> / <?php echo $totalRecords; ?>
-        </div>
-        <nav aria-label="Utility bill pagination">
-            <ul class="pagination mb-0">
-                <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="<?php echo buildUtilityBillPageUrl($page - 1, $monthFilter, $tenantFilter, $sortBy, $sortOrder); ?>"><?php echo t('previous'); ?></a>
-                </li>
-
-                <?php
-                $startPage = max(1, $page - 1);
-                $endPage = min($totalPages, $page + 1);
-
-                if ($totalPages > 3) {
-                    if ($page <= 2) {
-                        $startPage = 1;
-                        $endPage = 3;
-                    } elseif ($page >= $totalPages - 1) {
-                        $startPage = $totalPages - 2;
-                        $endPage = $totalPages;
-                    }
-                }
-                ?>
-
-                <?php if ($startPage > 1): ?>
-                <li class="page-item"><a class="page-link" href="<?php echo buildUtilityBillPageUrl(1, $monthFilter, $tenantFilter, $sortBy, $sortOrder); ?>">1</a></li>
-                <?php if ($startPage > 2): ?>
-                <li class="page-item disabled"><span class="page-link">...</span></li>
-                <?php endif; ?>
-                <?php endif; ?>
-
-                <?php for ($i = $startPage; $i <= $endPage; $i++): ?>
-                <li class="page-item <?php echo $i === $page ? 'active' : ''; ?>">
-                    <a class="page-link" href="<?php echo buildUtilityBillPageUrl($i, $monthFilter, $tenantFilter, $sortBy, $sortOrder); ?>"><?php echo $i; ?></a>
-                </li>
-                <?php endfor; ?>
-
-                <?php if ($endPage < $totalPages): ?>
-                <?php if ($endPage < $totalPages - 1): ?>
-                <li class="page-item disabled"><span class="page-link">...</span></li>
-                <?php endif; ?>
-                <li class="page-item"><a class="page-link" href="<?php echo buildUtilityBillPageUrl($totalPages, $monthFilter, $tenantFilter, $sortBy, $sortOrder); ?>"><?php echo $totalPages; ?></a></li>
-                <?php endif; ?>
-
-                <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="<?php echo buildUtilityBillPageUrl($page + 1, $monthFilter, $tenantFilter, $sortBy, $sortOrder); ?>"><?php echo t('next'); ?></a>
-                </li>
-            </ul>
-        </nav>
-    </div>
-    <?php endif; ?>
+    <?php renderUnifiedPagination($page, $totalPages, (int)$totalRecords, $itemsPerPage, [
+        'month' => $monthFilter,
+        'tenant' => $tenantFilter,
+        'sort_by' => $sortBy,
+        'sort_order' => $sortOrder,
+    ], t('utility_bills')); ?>
 </div>
 
 <?php include __DIR__ . '/../../includes/footer.php'; ?>

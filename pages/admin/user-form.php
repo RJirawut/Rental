@@ -51,21 +51,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    $username = sanitize($_POST['username'] ?? '');
-    $fullName = sanitize($_POST['full_name'] ?? '');
-    $email = sanitize($_POST['email'] ?? '');
-    $role = 'admin';
-    $isActive = isset($_POST['is_active']) ? 1 : 0;
-    $accountStatus = ($_POST['account_status'] ?? 'active') === 'suspended' ? 'suspended' : 'active';
-    if (!$isActive) {
-        $accountStatus = 'active';
-    }
-    $password = $_POST['password'] ?? '';
-    $previousAccountStatus = $user['account_status'] ?? 'active';
-    
-    if (empty($username) || empty($fullName) || empty($email)) {
-        $error = t('required_field');
-    } else {
+    // A failed PIN must stop processing before any database write occurs.
+    if (!isset($error)) {
+        $username = sanitize($_POST['username'] ?? '');
+        $fullName = sanitize($_POST['full_name'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $role = 'admin';
+        $password = $_POST['password'] ?? '';
+        $previousAccountStatus = $user['account_status'] ?? 'active';
+        $isCurrentUser = $id > 0 && $id === (int) ($_SESSION['user_id'] ?? 0);
+        // Disabled controls are omitted from POST, so keep the current account active server-side.
+        $isActive = $isCurrentUser ? 1 : (isset($_POST['is_active']) ? 1 : 0);
+        $accountStatus = $isCurrentUser
+            ? $previousAccountStatus
+            : (($_POST['account_status'] ?? 'active') === 'suspended' ? 'suspended' : 'active');
+        if (!$isActive) {
+            $accountStatus = 'active';
+        }
+
+        if (empty($username) || empty($fullName) || empty($email)) {
+            $error = t('required_field');
+        } elseif (!isValidEmailFormat($email)) {
+            $error = t('invalid_email_format');
+        } else {
         // Check if username or email already exists
         if ($id > 0) {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ? AND id != ?");
@@ -155,6 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+}
 }
 
 include __DIR__ . '/../../includes/header.php';

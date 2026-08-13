@@ -114,20 +114,22 @@ $sheet1->getRowDimension(2)->setRowHeight(25);
 
 // Query daily tenants
 $stmt1 = $pdo->prepare("
-    SELECT dt.*, r.room_number, rt.type_name, rt.type_name_en 
+    SELECT dt.guest_name, dt.phone, dt.email, dt.check_in_date, dt.check_out_date,
+           dt.actual_check_in_date, dt.actual_check_out_date, dt.num_guests,
+           dt.daily_rate, dt.total_days, dt.total_amount, dt.status,
+           dt.cancel_refunded, dt.created_at, r.room_number
     FROM daily_tenants dt 
     JOIN rooms r ON dt.room_id = r.id 
-    JOIN room_types rt ON r.room_type_id = rt.id 
     WHERE dt.check_in_date >= ? AND dt.check_in_date <= ?
     ORDER BY dt.check_in_date ASC, r.room_number ASC
 ");
 $stmt1->execute(["$year-01-01", "$year-12-31"]);
-$dailyTenants = $stmt1->fetchAll();
 
 $row = 3;
 $totalDailyAmount = 0;
 
-foreach ($dailyTenants as $tenant) {
+// Stream rows directly into the spreadsheet instead of keeping the whole year in an array.
+while ($tenant = $stmt1->fetch()) {
     $isCancelledRefunded = $tenant['status'] === 'cancelled' && !empty($tenant['cancel_refunded']);
     $rowTotal = (float) $tenant['total_amount'];
     $displayDays = (int) $tenant['total_days'];
@@ -287,15 +289,16 @@ for ($m = 1; $m <= 12; $m++) {
     
     // Get active tenants for this month
     $stmt2 = $pdo->prepare("
-        SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en, rt.price_monthly,
+        SELECT mt.tenant_name, mt.phone, mt.email, mt.contract_start, mt.contract_end,
+               mt.monthly_rent, mt.status, mt.updated_at, r.room_number,
                ub.water_amount, ub.elec_amount, ub.other_fees, ub.discount, ub.total_amount,
                ub.bill_month, ub.status as bill_status,
                DATE_FORMAT(mt.updated_at, '%Y-%m') as termination_month
         FROM monthly_tenants mt
         JOIN rooms r ON mt.room_id = r.id
-        JOIN room_types rt ON r.room_type_id = rt.id
         LEFT JOIN (
-            SELECT ub1.*
+            SELECT ub1.tenant_id, ub1.bill_month, ub1.water_amount, ub1.elec_amount,
+                   ub1.other_fees, ub1.discount, ub1.total_amount, ub1.status
             FROM utility_bills ub1
             JOIN (
                 SELECT tenant_id, bill_month, MAX(id) AS max_id
@@ -310,9 +313,9 @@ for ($m = 1; $m <= 12; $m++) {
         ORDER BY r.room_number ASC
     ");
     $stmt2->execute([$monthStr, $nextMonthStart, $monthStart, $monthStart]);
-    $tenants = $stmt2->fetchAll();
 
-    foreach ($tenants as $tenant) {
+    // Stream each month so the export does not retain all monthly rows in memory.
+    while ($tenant = $stmt2->fetch()) {
         $contractStartMonth = date('Y-m', strtotime($tenant['contract_start']));
         $contractEndMonth = date('Y-m', strtotime($tenant['contract_end']));
         $isTerminationMonth = $tenant['status'] === 'terminated' && $tenant['termination_month'] === $monthStr;
@@ -455,7 +458,8 @@ $sheet3->getRowDimension(2)->setRowHeight(25);
 
 // Query utility bills
 $stmt3 = $pdo->prepare("
-    SELECT ub.*, mt.tenant_name, r.room_number 
+    SELECT ub.bill_month, ub.water_units, ub.water_amount, ub.elec_units, ub.elec_amount,
+           mt.tenant_name, r.room_number
     FROM utility_bills ub 
     JOIN monthly_tenants mt ON ub.tenant_id = mt.id 
     JOIN rooms r ON ub.room_id = r.id 
@@ -463,7 +467,6 @@ $stmt3 = $pdo->prepare("
     ORDER BY ub.bill_month ASC, r.room_number ASC
 ");
 $stmt3->execute(["$year-01", "$year-12"]);
-$bills = $stmt3->fetchAll();
 
 $row = 3;
 $totalWaterUnits = 0;
@@ -471,7 +474,8 @@ $totalWaterAmt = 0;
 $totalElecUnits = 0;
 $totalElecAmt = 0;
 
-foreach ($bills as $bill) {
+// Stream utility bill rows directly into the spreadsheet.
+while ($bill = $stmt3->fetch()) {
     list($bYear, $bMonth) = explode('-', $bill['bill_month']);
     $billMonthLabel = $localizedMonthsFull[intval($bMonth) - 1] . ' ' . $bYear;
 
@@ -556,7 +560,8 @@ $sheet4->getRowDimension(2)->setRowHeight(25);
 
 // Query invoices
 $stmt4 = $pdo->prepare("
-    SELECT i.*, r.room_number,
+    SELECT i.invoice_number, i.invoice_type, i.tenant_type, i.tenant_id,
+           i.created_at, i.grand_total, r.room_number,
            COALESCE(dt.guest_name, mt.tenant_name) as tenant_name
     FROM invoices i
     JOIN rooms r ON i.room_id = r.id
@@ -566,12 +571,12 @@ $stmt4 = $pdo->prepare("
     ORDER BY i.created_at ASC, i.invoice_number ASC
 ");
 $stmt4->execute(["$year-01-01", ($year + 1) . "-01-01"]);
-$invoices = $stmt4->fetchAll();
 
 $row = 3;
 $totalInvoiceAmt = 0;
 
-foreach ($invoices as $invoice) {
+// Stream invoice rows directly into the spreadsheet.
+while ($invoice = $stmt4->fetch()) {
     $invTypeLabel = $invoice['invoice_type'] === 'daily' ? t('daily') : t('monthly');
     $grandT = (float)$invoice['grand_total'];
 

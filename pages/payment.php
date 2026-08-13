@@ -43,77 +43,139 @@ if (!$paymentRecord) {
 $alreadyPaid = false;
 $total = 0.0;
 $paidDate = null;
-$paidAmount = 0.0;
 
 if ($billType === 'monthly') {
-    $total = (float) $paymentRecord['rent_amount']
+    $grandTotal = (float) $paymentRecord['rent_amount']
         + (float) $paymentRecord['water_amount']
         + (float) $paymentRecord['elec_amount']
         + (float) $paymentRecord['other_fees']
         - (float) $paymentRecord['discount'];
     $alreadyPaid = $paymentRecord['status'] === 'paid';
     $paidDate = $paymentRecord['paid_date'];
-    $paidAmount = (float) ($paymentRecord['paid_amount'] ?: $total);
+    $total = $grandTotal;
 } else {
-    $total = (float) ($paymentRecord['invoice_grand_total'] ?? $paymentRecord['total_amount']);
+    $grandTotal = (float) ($paymentRecord['invoice_grand_total'] ?? $paymentRecord['total_amount']);
     $alreadyPaid = $paymentRecord['status'] !== 'pending_payment';
     $paidDate = date('Y-m-d');
-    $paidAmount = $total;
+    $total = $grandTotal;
 }
 
-// Handle AJAX Payment Submission (direct payment & status update)
+ensurePaymentConfirmationsTable();
+$pendingConfirmation = null;
+$stmtPending = $pdo->prepare("SELECT * FROM payment_confirmations WHERE bill_type = ? AND bill_id = ? AND status = 'pending_verify' ORDER BY id DESC LIMIT 1");
+$stmtPending->execute([$billType, $paymentRecord['id']]);
+$pendingConfirmation = $stmtPending->fetch() ?: null;
+
+if ($pendingConfirmation) {
+    $alreadyPaid = false;
+}
+
+// Define variables needed by both POST handler and template
+$isEnglish = ($_SESSION['lang'] ?? 'th') === 'en';
+$tenantName = $billType === 'daily'
+    ? ($paymentRecord['guest_name'] ?? '')
+    : ($paymentRecord['tenant_name'] ?? '');
+$roomNumber = $paymentRecord['room_number'] ?? '';
+$paymentLinkExpired = $billType === 'daily'
+    && !$alreadyPaid
+    && !empty($paymentRecord['payment_deadline'])
+    && strtotime($paymentRecord['payment_deadline']) < time();
+
+// Handle AJAX Payment Submission (submit slip for admin verification)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
+    requireValidCsrfToken();
 
     if ($alreadyPaid) {
-        echo json_encode(['success' => false, 'message' => 'This bill has already been paid.']);
+        echo json_encode(['success' => false, 'message' => $isEnglish ? 'This bill has already been paid.' : 'บิลนี้ชำระเงินเรียบร้อยแล้ว']);
+        exit;
+    }
+
+    if ($pendingConfirmation) {
+        echo json_encode(['success' => false, 'message' => $isEnglish ? 'You already have a pending payment verification.' : 'คุณมีรายการแจ้งชำระเงินที่อยู่ระหว่างรอตรวจสอบแล้ว']);
+        exit;
+    }
+
+    if ($paymentLinkExpired) {
+        echo json_encode(['success' => false, 'message' => $isEnglish ? 'This payment link has expired.' : 'ลิงก์ชำระเงินนี้หมดอายุแล้ว']);
+        exit;
+    }
+
+    if ($total <= 0) {
+        echo json_encode(['success' => false, 'message' => $isEnglish ? 'There is no outstanding balance to pay.' : 'ไม่มียอดค้างชำระ']);
+        exit;
+    }
+
+    $slipFile = $_FILES['slip_image'] ?? null;
+    $allowedSlipTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    $slipMimeType = is_array($slipFile) && isset($slipFile['tmp_name']) && is_uploaded_file($slipFile['tmp_name'])
+        ? (new finfo(FILEINFO_MIME_TYPE))->file($slipFile['tmp_name'])
+        : false;
+    if (!is_array($slipFile)
+        || ($slipFile['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
+        || !is_numeric($slipFile['size'] ?? null)
+        || (int) $slipFile['size'] <= 0
+        || (int) $slipFile['size'] > 5 * 1024 * 1024
+        || !in_array($slipMimeType, $allowedSlipTypes, true)
+        || @getimagesize($slipFile['tmp_name']) === false) {
+        echo json_encode(['success' => false, 'message' => $isEnglish ? 'Please upload a valid slip image (JPG, PNG, or WEBP; maximum 5 MB).' : 'กรุณาแนบรูปสลิปที่ถูกต้อง (JPG, PNG หรือ WEBP ขนาดไม่เกิน 5 MB)']);
         exit;
     }
 
     try {
         $pdo->beginTransaction();
 
-        if ($billType === 'monthly') {
-            $stmt = $pdo->prepare("
-                UPDATE utility_bills
-                SET status = 'paid', paid_date = CURDATE(), paid_amount = ?
-                WHERE id = ?
-            ");
-            $stmt->execute([$total, $paymentRecord['id']]);
-        } else {
-            $stmt = $pdo->prepare("
-                UPDATE daily_tenants
-                SET status = NULL, payment_deadline = NULL
-                WHERE id = ?
-            ");
-            $stmt->execute([$paymentRecord['id']]);
-            if (function_exists('syncRoomStatuses')) {
-                syncRoomStatuses();
-            }
+        $stmtPendingLock = $pdo->prepare("SELECT id FROM payment_confirmations WHERE bill_type = ? AND bill_id = ? AND status = 'pending_verify' FOR UPDATE");
+        $stmtPendingLock->execute([$billType, $paymentRecord['id']]);
+        if ($stmtPendingLock->fetch()) {
+            throw new RuntimeException('A payment confirmation is already pending');
         }
 
+        $upload = uploadPaymentSlip($_FILES['slip_image'] ?? []);
+        if (!$upload['success']) {
+            throw new RuntimeException($upload['message']);
+        }
+        $slipFilename = $upload['filename'];
+
+        $stmtPc = $pdo->prepare("
+            INSERT INTO payment_confirmations
+            (bill_type, bill_id, room_number, tenant_name, amount, payment_method, transfer_date, slip_image, status, created_at)
+            VALUES (?, ?, ?, ?, ?, 'promptpay', CURDATE(), ?, 'pending_verify', NOW())
+        ");
+        $stmtPc->execute([
+            $billType,
+            $paymentRecord['id'],
+            $roomNumber,
+            $tenantName,
+            $total,
+            $slipFilename
+        ]);
+
         $pdo->commit();
-        logActivity('pay_bill_online', 'utility_bills', $paymentRecord['id'], "Paid {$billType} bill of {$total}");
+        logActivity('submit_payment_slip', 'payment_confirmations', $paymentRecord['id'], "Submitted payment confirmation for {$billType} bill #{$paymentRecord['id']} of {$total}");
 
         echo json_encode([
             'success' => true,
-            'message' => ($_SESSION['lang'] ?? 'th') === 'en'
-                ? 'Payment completed successfully!'
-                : 'ชำระเงินเรียบร้อยแล้ว',
+            'message' => $isEnglish
+                ? 'Payment notice submitted successfully! Pending admin verification.'
+                : 'แจ้งชำระเงินเรียบร้อยแล้ว อยู่ระหว่างรอผู้ดูแลระบบตรวจสอบ',
         ]);
         exit;
     } catch (Exception $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+        if (!empty($slipFilename)) {
+            @unlink(__DIR__ . '/../uploads/slips/' . $slipFilename);
+        }
+        error_log('Payment slip submission failed: ' . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => $isEnglish ? 'Unable to submit the payment notice. Please try again.' : 'ไม่สามารถส่งการแจ้งชำระเงินได้ กรุณาลองใหม่อีกครั้ง']);
         exit;
     }
 }
 
 $error = null;
-if ($billType === 'daily' && !$alreadyPaid && !empty($paymentRecord['payment_deadline'])
-    && strtotime($paymentRecord['payment_deadline']) < time()) {
+if ($paymentLinkExpired) {
     $error = 'This payment link has expired.';
 }
 
@@ -123,18 +185,13 @@ $primaryColor = $settings['primary_color'] ?? '#0d6efd';
 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $primaryColor)) {
     $primaryColor = '#0d6efd';
 }
-$isEnglish = ($_SESSION['lang'] ?? 'th') === 'en';
 $promptpayId = $settings['promptpay_id'] ?? '';
 $qrUrl = '';
-if ($promptpayId && $total > 0 && !$error && !$alreadyPaid) {
+if ($promptpayId && $total > 0 && !$error && !$alreadyPaid && !$pendingConfirmation) {
     $payload = generatePromptPayPayload($promptpayId, $total);
     $qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' . urlencode($payload);
 }
 
-$tenantName = $billType === 'daily'
-    ? ($paymentRecord['guest_name'] ?? '')
-    : ($paymentRecord['tenant_name'] ?? '');
-$roomNumber = $paymentRecord['room_number'] ?? '';
 $paymentHeading = $billType === 'daily'
     ? ($isEnglish ? 'Room Booking Payment' : 'ชำระค่าจองห้องพัก')
     : t('invoice_bill_for_month') . ' ' . formatBillMonth($paymentRecord['bill_month'] ?? '');
@@ -188,8 +245,35 @@ $paymentHeading = $billType === 'daily'
                 <i class="bi bi-check-circle-fill success-icon"></i>
                 <h3 class="mt-3"><?php echo $isEnglish ? 'Payment Completed' : 'ชำระเงินเรียบร้อยแล้ว'; ?></h3>
                 <?php if ($paidDate): ?><p class="text-muted"><?php echo t('paid_date'); ?>: <?php echo formatDate($paidDate); ?></p><?php endif; ?>
-                <div class="mt-4"><h2 class="text-success mb-0"><?php echo formatCurrency($paidAmount ?: $total); ?> <?php echo t('baht'); ?></h2></div>
+                <div class="mt-4"><h2 class="text-success mb-0"><?php echo formatCurrency($total); ?> <?php echo t('baht'); ?></h2></div>
                 <p class="text-muted small mt-3"><?php echo $isEnglish ? 'This bill has been paid and cannot be scanned again.' : 'รายการนี้ชำระเงินแล้ว ไม่สามารถสแกนชำระซ้ำได้'; ?></p>
+            </div>
+        <?php elseif ($pendingConfirmation): ?>
+            <div class="text-center py-4">
+                <i class="bi bi-hourglass-split text-warning" style="font-size: 4.5rem;"></i>
+                <h3 class="mt-3 fw-bold"><?php echo $isEnglish ? 'Payment Verification Pending' : 'แจ้งชำระเงินเรียบร้อยแล้ว'; ?></h3>
+                <p class="text-muted"><?php echo $isEnglish ? 'Your payment notice is currently pending admin review.' : 'ข้อมูลสลิปการโอนเงินของคุณถูกส่งเรียบร้อยแล้ว อยู่ระหว่างรอผู้ดูแลระบบตรวจสอบ'; ?></p>
+                <span class="badge bg-warning text-dark px-3 py-2 fs-6 mt-1 mb-3"><i class="bi bi-clock me-1"></i><?php echo t('pending_verify'); ?></span>
+                <div class="card border-0 bg-light p-3 mt-3 text-start">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-muted"><?php echo t('room'); ?>:</span>
+                        <span class="fw-bold"><?php echo htmlspecialchars($roomNumber); ?> (<?php echo htmlspecialchars($tenantName); ?>)</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-muted"><?php echo t('payment_amount'); ?>:</span>
+                        <span class="fw-bold text-success"><?php echo formatCurrency($pendingConfirmation['amount']); ?> <?php echo t('baht'); ?></span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-0">
+                        <span class="text-muted"><?php echo t('created_at'); ?>:</span>
+                        <span><?php echo formatDate($pendingConfirmation['created_at']); ?></span>
+                    </div>
+                </div>
+                <?php if (!empty($pendingConfirmation['slip_image'])): ?>
+                    <div class="mt-3">
+                        <p class="small text-muted mb-2"><?php echo t('payment_slip'); ?>:</p>
+                        <img src="<?php echo BASE_URL . 'uploads/slips/' . htmlspecialchars($pendingConfirmation['slip_image']); ?>" alt="Slip" class="img-fluid rounded shadow-sm border" style="max-height: 240px; object-fit: contain;">
+                    </div>
+                <?php endif; ?>
             </div>
         <?php else: ?>
             <div class="text-center mb-4">
@@ -211,28 +295,64 @@ $paymentHeading = $billType === 'daily'
                 <div class="detail-row total"><span><?php echo t('grand_total'); ?></span><span><?php echo formatCurrency($total); ?> <?php echo t('baht'); ?></span></div>
             </div>
 
-            <?php if ($qrUrl): ?>
-                <div class="qr-box">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/PromptPay_logo.svg/512px-PromptPay_logo.svg.png" alt="PromptPay" style="height: 30px; margin-bottom: 10px;">
-                    <img src="<?php echo htmlspecialchars($qrUrl); ?>" alt="PromptPay QR Code" class="qr-image">
-                    <?php if (!empty($settings['promptpay_name'])): ?><p class="mb-1 fw-bold"><?php echo htmlspecialchars($settings['promptpay_name']); ?></p><?php endif; ?>
-                    <p class="mb-0 text-muted small"><?php echo t('scan_qr_to_pay'); ?> · <?php echo htmlspecialchars($promptpayId); ?></p>
-                </div>
-            <?php endif; ?>
+            <!-- Pay Now Trigger Button -->
+            <div id="payActionBlock" class="mt-4 text-center">
+                <button type="button" id="payNowBtn" class="btn btn-primary btn-lg w-100 rounded-pill py-3 shadow-sm fw-bold" onclick="showQrCodeSection()">
+                    <i class="bi bi-qr-code-scan me-2 fs-5"></i><?php echo $isEnglish ? 'Pay Now' : 'ชำระเงิน'; ?>
+                </button>
+            </div>
 
-            <?php if (!empty($settings['bank_account_number']) && !empty($settings['bank_name'])): ?>
-                <div class="bill-details text-center">
-                    <h6 class="mb-2"><i class="bi bi-bank me-2"></i><?php echo t('or_transfer_to'); ?></h6>
-                    <p class="mb-1"><strong><?php echo htmlspecialchars($settings['bank_name']); ?></strong></p>
-                    <p class="mb-1" style="font-size: 1.2rem; font-family: monospace; letter-spacing: 1px;"><?php echo htmlspecialchars($settings['bank_account_number']); ?></p>
-                    <?php if (!empty($settings['bank_account_name'])): ?><p class="mb-0 text-muted"><?php echo htmlspecialchars($settings['bank_account_name']); ?></p><?php endif; ?>
-                </div>
-            <?php endif; ?>
+            <!-- Toggleable Payment Area (QR Code & Bank Info) -->
+            <div id="qrCodeArea" class="mt-4" style="display: none;">
+                <?php if ($qrUrl): ?>
+                    <div class="qr-box shadow-sm border-0 mb-4" style="background: #f8fafc; border-radius: 1rem;">
+                        <div>
+                            <img src="<?php echo htmlspecialchars($qrUrl); ?>" alt="PromptPay QR Code" class="qr-image shadow-sm border p-2 bg-white" style="border-radius: 0.75rem;">
+                        </div>
+                        <div class="mt-2 fw-bold text-dark fs-5"><?php echo formatCurrency($total); ?> <?php echo t('baht'); ?></div>
+                        <?php if (!empty($settings['promptpay_name'])): ?><p class="mb-1 text-secondary fw-semibold"><?php echo htmlspecialchars($settings['promptpay_name']); ?></p><?php endif; ?>
+                        <p class="mb-0 text-muted small"><i class="bi bi-info-circle me-1"></i><?php echo t('scan_qr_to_pay'); ?> · <?php echo htmlspecialchars($promptpayId); ?></p>
+                    </div>
+                <?php endif; ?>
 
-            <form id="paymentForm" class="mt-4">
-                <input type="hidden" name="payment_token" value="<?php echo htmlspecialchars($token); ?>">
-                <button type="submit" class="btn btn-primary btn-lg w-100" id="submitBtn"><i class="bi bi-check-circle me-2"></i><?php echo $isEnglish ? 'Confirm Payment' : 'ยืนยันการชำระเงิน'; ?></button>
-            </form>
+                <?php if (!empty($settings['bank_account_number']) && !empty($settings['bank_name'])): ?>
+                    <div class="bill-details text-center mb-4">
+                        <h6 class="mb-2 text-muted"><i class="bi bi-bank me-2"></i><?php echo t('or_transfer_to'); ?></h6>
+                        <p class="mb-1 fw-bold text-dark fs-5"><?php echo htmlspecialchars($settings['bank_name']); ?></p>
+                        <p class="mb-1 text-primary fw-bold" style="font-size: 1.3rem; font-family: monospace; letter-spacing: 1.5px;"><?php echo htmlspecialchars($settings['bank_account_number']); ?></p>
+                        <?php if (!empty($settings['bank_account_name'])): ?><p class="mb-0 text-muted small"><?php echo htmlspecialchars($settings['bank_account_name']); ?></p><?php endif; ?>
+                    </div>
+                <?php endif; ?>
+
+                <!-- Notify Payment Button -->
+                <div class="text-center mb-3">
+                    <button type="button" id="notifyBtn" class="btn btn-success btn-lg w-100 rounded-pill py-3 shadow-sm fw-bold" onclick="showNotifyForm()">
+                        <i class="bi bi-file-earmark-arrow-up me-2 fs-5"></i><?php echo $isEnglish ? 'Notify Payment / Attach Slip' : 'แจ้งชำระเงิน (แนบสลิป)'; ?>
+                    </button>
+                </div>
+
+                <!-- Slip Upload & Confirmation Form -->
+                <form id="paymentForm" class="mt-3 p-4 bg-light rounded-4 border" style="display: none;" enctype="multipart/form-data">
+                    <?php echo csrfInput(); ?>
+                    <input type="hidden" name="payment_token" value="<?php echo htmlspecialchars($token); ?>">
+                    <h6 class="fw-bold mb-3 text-dark d-flex align-items-center">
+                        <i class="bi bi-cloud-upload text-primary fs-5 me-2"></i>
+                        <?php echo $isEnglish ? 'Upload Payment Slip' : 'แนบสลิปการโอนเงิน'; ?>
+                    </h6>
+                    <div class="mb-3 text-start">
+                        <label class="form-label small fw-bold text-muted"><?php echo t('upload_slip'); ?></label>
+                        <input type="file" name="slip_image" class="form-control" accept="image/jpeg,image/png,image/webp" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg w-100 rounded-pill shadow-sm" id="submitBtn">
+                        <i class="bi bi-check-circle me-2"></i><?php echo $isEnglish ? 'Confirm Payment Notice' : 'ยืนยันการแจ้งชำระเงิน'; ?>
+                    </button>
+                    <div class="text-center mt-3">
+                        <a href="<?php echo BASE_URL; ?>pages/payment-notice.php" class="small text-decoration-none text-muted">
+                            <i class="bi bi-file-earmark-text me-1"></i><?php echo $isEnglish ? 'Or submit via public payment notice form' : 'หรือส่งสลิปผ่านฟอร์มแจ้งชำระเงินทั่วไป'; ?>
+                        </a>
+                    </div>
+                </form>
+            </div>
         <?php endif; ?>
     </div>
 </div>
@@ -241,6 +361,30 @@ $paymentHeading = $billType === 'daily'
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+function showQrCodeSection() {
+    const qrArea = document.getElementById('qrCodeArea');
+    const payBlock = document.getElementById('payActionBlock');
+    if (qrArea) {
+        qrArea.style.display = 'block';
+        qrArea.scrollIntoView({ behavior: 'smooth' });
+    }
+    if (payBlock) {
+        payBlock.style.display = 'none';
+    }
+}
+
+function showNotifyForm() {
+    const form = document.getElementById('paymentForm');
+    const notifyBtn = document.getElementById('notifyBtn');
+    if (form) {
+        form.style.display = 'block';
+        form.scrollIntoView({ behavior: 'smooth' });
+    }
+    if (notifyBtn) {
+        notifyBtn.style.display = 'none';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('paymentForm');
     if (!form) return;
@@ -251,11 +395,15 @@ document.addEventListener('DOMContentLoaded', function () {
         submitButton.disabled = true;
         submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span> Processing...';
 
-        fetch('payment.php', { method: 'POST', body: new FormData(this) })
+        fetch('payment.php?token=<?php echo urlencode($token); ?>', {
+            method: 'POST',
+            body: new FormData(this),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
             .then(response => response.json())
             .then(data => {
                 if (!data.success) throw new Error(data.message || 'An error occurred');
-                Swal.fire({ icon: 'success', title: '<?php echo $isEnglish ? 'Payment Completed' : 'ชำระเงินเรียบร้อยแล้ว'; ?>', text: data.message, confirmButtonColor: '<?php echo $primaryColor; ?>' })
+                Swal.fire({ icon: 'info', title: '<?php echo $isEnglish ? 'Payment Notice Submitted' : 'แจ้งชำระเงินเรียบร้อย'; ?>', text: data.message, confirmButtonColor: '<?php echo $primaryColor; ?>' })
                     .then(() => window.location.reload());
             })
             .catch(error => {

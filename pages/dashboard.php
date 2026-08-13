@@ -16,18 +16,18 @@ $currentMonth = date('Y-m');
 [$currentMonthStart, $nextMonthStart] = monthDateRange($currentMonth);
 
 // Keep dashboard income aligned with the income report calculations.
-$paidAmountExpr = "CASE WHEN paid_amount > 0 THEN paid_amount ELSE total_amount END";
+$paidTotalColumn = 'total_amount';
 
 // Daily income today
 $dailyIncomeToday = getDailyTenantRevenueByDate($today);
 
 // Monthly income today
-$stmt = $pdo->prepare("SELECT COALESCE(SUM($paidAmountExpr), 0) as income FROM utility_bills WHERE paid_date >= ? AND paid_date < ? AND status = 'paid'");
+$stmt = $pdo->prepare("SELECT COALESCE(SUM($paidTotalColumn), 0) as income FROM utility_bills WHERE paid_date >= ? AND paid_date < ? AND status = 'paid'");
 $stmt->execute([$today, $tomorrow]);
 $monthlyIncomeToday = $stmt->fetch()['income'];
 
 // Monthly income this month (for total calculation)
-$stmt = $pdo->prepare("SELECT COALESCE(SUM($paidAmountExpr), 0) as income FROM utility_bills WHERE paid_date >= ? AND paid_date < ? AND status = 'paid'");
+$stmt = $pdo->prepare("SELECT COALESCE(SUM($paidTotalColumn), 0) as income FROM utility_bills WHERE paid_date >= ? AND paid_date < ? AND status = 'paid'");
 $stmt->execute([$currentMonthStart, $nextMonthStart]);
 $monthlyIncome = $stmt->fetch()['income'];
 
@@ -89,7 +89,7 @@ for ($i = 5; $i >= 0; $i--) {
     $dailyIncome = getDailyTenantRevenueByMonth($month);
 
     [$chartMonthStart, $nextChartMonthStart] = monthDateRange($month);
-    $stmt = $pdo->prepare("SELECT COALESCE(SUM($paidAmountExpr), 0) as monthly FROM utility_bills WHERE paid_date >= ? AND paid_date < ? AND status = 'paid'");
+    $stmt = $pdo->prepare("SELECT COALESCE(SUM($paidTotalColumn), 0) as monthly FROM utility_bills WHERE paid_date >= ? AND paid_date < ? AND status = 'paid'");
     $stmt->execute([$chartMonthStart, $nextChartMonthStart]);
     $monthlyIncomeChart = $stmt->fetch()['monthly'];
 

@@ -17,6 +17,7 @@ $primaryColor = $settings['primary_color'] ?? '#0d6efd';
 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $primaryColor)) {
     $primaryColor = '#0d6efd';
 }
+$isEnglish = ($_SESSION['lang'] ?? 'th') === 'en';
 
 // Fetch active rooms for dropdown
 $rooms = [];
@@ -42,9 +43,11 @@ if (!empty($searchTicket)) {
 
 // Handle Form Submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_repair') {
+    requireValidCsrfToken();
+
     $roomNumber = trim($_POST['room_number'] ?? '');
     $reporterName = trim($_POST['reporter_name'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
+    $phone = normalizePhoneDigits($_POST['phone'] ?? '');
     $email = trim($_POST['email'] ?? '');
     $title = trim($_POST['title'] ?? '');
     $priority = $_POST['priority'] ?? 'normal';
@@ -56,38 +59,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
 
     if (empty($roomNumber) || empty($reporterName) || empty($phone) || empty($title) || empty($description)) {
         $errorMsg = t('please_enter_all_required');
+    } elseif (!isValidEmailFormat($email)) {
+        $errorMsg = t('invalid_email_format');
     } else {
-        // Upload image if provided
-        $imagePath = null;
-        if (!empty($_FILES['image']['name']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
-            $uploadDir = __DIR__ . '/../assets/images/repairs/';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
-            $ext = strtolower(pathinfo($_FILES['image']['name'], PATHINFO_EXTENSION));
-            if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true)) {
-                $filename = 'repair_' . time() . '_' . uniqid() . '.' . $ext;
-                if (move_uploaded_file($_FILES['image']['tmp_name'], $uploadDir . $filename)) {
-                    $imagePath = 'assets/images/repairs/' . $filename;
-                }
-            }
-        }
-
-        // Generate unique Ticket Number (e.g., REP-20260723-A4F2)
-        $dateCode = date('Ymd');
-        $randomCode = strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 4));
-        $ticketNumber = 'REP-' . $dateCode . '-' . $randomCode;
-
-        // Try to match room_id
-        $roomId = null;
         $stmtRoomMatch = $pdo->prepare("SELECT id FROM rooms WHERE room_number = ? LIMIT 1");
         $stmtRoomMatch->execute([$roomNumber]);
         $roomMatch = $stmtRoomMatch->fetch();
-        if ($roomMatch) {
-            $roomId = $roomMatch['id'];
+        if (!$roomMatch) {
+            $errorMsg = $isEnglish ? 'The selected room was not found.' : 'ไม่พบห้องที่เลือก';
         }
 
-        try {
+        // Upload image only after the room and request data are valid.
+        $imagePath = null;
+        if (!$errorMsg && !empty($_FILES['image']['name'])) {
+            $upload = uploadImage($_FILES['image'], 'repairs/');
+            if (!$upload['success']) {
+                $errorMsg = $isEnglish ? 'Unable to upload the attached image.' : 'ไม่สามารถอัปโหลดรูปภาพที่แนบได้';
+            } else {
+                $imagePath = 'assets/images/repairs/' . $upload['filename'];
+            }
+        }
+
+        if (!$errorMsg) {
+            $roomId = (int) $roomMatch['id'];
+            // The old four-character code was easy to enumerate. This provides 48 bits of entropy.
+            $ticketNumber = 'REP-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(6)));
+
+            try {
             $stmt = $pdo->prepare("
                 INSERT INTO repair_requests 
                 (ticket_number, room_id, room_number, reporter_name, phone, email, title, description, priority, status, image, created_at)
@@ -127,8 +125,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
             $_SESSION['success_ticket'] = $ticketNumber;
             header('Location: repair-request.php');
             exit;
-        } catch (Exception $e) {
-            $errorMsg = t('save_error') . ': ' . $e->getMessage();
+            } catch (Exception $e) {
+                if ($imagePath) {
+                    @unlink(BASE_PATH . $imagePath);
+                }
+                error_log('Public repair submission failed: ' . $e->getMessage());
+                $errorMsg = t('save_error');
+            }
         }
     }
 }
@@ -260,6 +263,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
             <?php endif; ?>
 
             <form method="POST" action="" enctype="multipart/form-data">
+                <?php echo csrfInput(); ?>
                 <input type="hidden" name="action" value="submit_repair">
 
                 <div class="row g-3">

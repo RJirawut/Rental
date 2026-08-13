@@ -61,13 +61,13 @@ try {
         
         echo json_encode([
             'success' => true,
-            'message' => "Cleared {$deletedCount} activity logs older than 90 days",
+            'message' => sprintf(t('cleared_old_activity_logs_success'), $deletedCount),
             'deleted_count' => $deletedCount
         ]);
     } else {
         echo json_encode([
             'success' => true,
-            'message' => 'No activity logs older than 90 days found',
+            'message' => t('no_old_activity_logs_found'),
             'deleted_count' => 0
         ]);
     }
@@ -76,6 +76,6 @@ try {
     error_log('Activity Logs cleanup failed: ' . $e->getMessage());
     echo json_encode([
         'success' => false,
-        'error' => 'Error clearing cache: ' . $e->getMessage()
+        'error' => t('clear_cache_error')
     ]);
 }

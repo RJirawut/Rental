@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../includes/pin-lockscreen-check.php';
 
 $pageTitle = t('email_queue_status');
 ensureEmailQueueTable();
+$settings = getSettings();
 
 // Get filter status
 $statusFilter = $_GET['status'] ?? '';
@@ -329,53 +330,11 @@ include __DIR__ . '/../../includes/header.php';
                         <p class="mt-2 mb-0"><?php echo t('email_no_emails_in_queue'); ?></p>
                     </div>
                     <?php else: ?>
-                    <!-- Pagination -->
-                    <?php if ($totalPages > 1): ?>
-                    <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
-                        <div class="text-muted mb-2 mb-md-0">
-                            <?php echo t('email_showing'); ?> <?php echo (($page - 1) * $itemsPerPage) + 1; ?> - <?php echo min($page * $itemsPerPage, $totalRecords); ?> <?php echo t('email_of'); ?> <?php echo $totalRecords; ?> <?php echo t('email_records'); ?>
-                        </div>
-                        <nav aria-label="Page navigation">
-                            <ul class="pagination mb-0">
-                                <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                                    <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('email_previous'); ?></a>
-                                </li>
-
-                                <?php
-                                $startPage = max(1, $page - 1);
-                                $endPage = min($totalPages, $page + 1);
-
-                                if ($totalPages > 3) {
-                                    if ($page <= 2) {
-                                        $startPage = 1;
-                                        $endPage = 3;
-                                    } elseif ($page >= $totalPages - 1) {
-                                        $startPage = $totalPages - 2;
-                                        $endPage = $totalPages;
-                                    }
-                                }
-
-                                if ($startPage > 1): ?>
-                                <li class="page-item disabled"><span class="page-link">...</span></li>
-                                <?php endif;
-
-                                for ($i = $startPage; $i <= $endPage; $i++): ?>
-                                <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                                    <a class="page-link" href="?page=<?php echo $i; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo $i; ?></a>
-                                </li>
-                                <?php endfor;
-
-                                if ($endPage < $totalPages): ?>
-                                <li class="page-item disabled"><span class="page-link">...</span></li>
-                                <?php endif; ?>
-
-                                <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                                    <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('email_next'); ?></a>
-                                </li>
-                            </ul>
-                        </nav>
-                    </div>
-                    <?php endif; ?>
+                    <?php renderUnifiedPagination($page, $totalPages, (int)$totalRecords, $itemsPerPage, [
+                        'status' => $statusFilter,
+                        'sort_by' => $sortBy,
+                        'sort_order' => $sortOrder,
+                    ], t('email_queue')); ?>
                     <?php endif; ?>
                 </div>
             </div>
@@ -617,10 +576,13 @@ document.addEventListener('DOMContentLoaded', function () {
             confirmButtonText: '<?php echo t('clear_emails'); ?>',
             cancelButtonText: '<?php echo t('cancel'); ?>'
         }).then(function (result) {
-            if (!result.isConfirmed) return;
-
-            // Show PIN modal
-            showPinModalForClearEmailQueue();
+            // Show PIN modal only if PIN system is enabled in settings
+            const hasPin = <?php echo !empty($settings['pin']) ? 'true' : 'false'; ?>;
+            if (hasPin) {
+                showPinModalForClearEmailQueue();
+            } else {
+                executeClearEmailQueue('');
+            }
         });
 
         function showPinModalForClearEmailQueue() {

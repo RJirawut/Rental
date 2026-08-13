@@ -1,15 +1,9 @@
-# Alwaysdata deployment template for Rental Management System.
-# Copy this file to ".htaccess" on the server and replace the placeholders.
+# Local XAMPP settings (defaults match config/database.php).
+# For Alwaysdata deployment, copy .htaccess.alwaysdata.example to .htaccess on the server.
 
-SetEnv RENTAL_DB_HOST "mysql-your-account.alwaysdata.net"
-SetEnv RENTAL_DB_USER "your-account_rental_user"
-SetEnv RENTAL_DB_PASSWORD "your-database-password"
-SetEnv RENTAL_DB_NAME "your-account_rental"
-SetEnv RENTAL_BASE_URL "/"
-SetEnv RENTAL_APP_HOST "your-domain.example"
-SetEnv RENTAL_APP_SCHEME "https"
-
-# Enable the installer only during the first setup.
-SetEnv RENTAL_ALLOW_SETUP "1"
-SetEnv RENTAL_SETUP_TOKEN "change-this-token"
+SetEnv RENTAL_DB_HOST "localhost"
+SetEnv RENTAL_DB_USER "root"
+SetEnv RENTAL_DB_PASSWORD ""
+SetEnv RENTAL_DB_NAME "rental_db"
+SetEnv RENTAL_BASE_URL "/Rental/"
 SetEnv RENTAL_ADMIN_PASSWORD "change-this-password"

@@ -44,6 +44,90 @@ if (!empty($dbPin) && empty($_POST['check_only'])) {
 }
 
 ensureIncomeSnapshotsTable();
+ensurePaymentConfirmationsTable();
+ensureRepairRequestsTable();
+
+/**
+ * Remove customer-uploaded files that are no longer referenced by the database.
+ * Only the dedicated slip and repair-upload directories are scanned; system
+ * assets such as the configured logo are intentionally excluded.
+ */
+function cleanupOrphanCustomerUploadFiles(PDO $pdo): array
+{
+    $referencedFiles = [
+        'slips' => [],
+        'repairs' => [],
+    ];
+
+    try {
+        $stmt = $pdo->query("SELECT slip_image FROM payment_confirmations WHERE slip_image IS NOT NULL AND slip_image <> ''");
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $filename) {
+            $filename = basename((string) $filename);
+            if ($filename !== '' && $filename !== '.') {
+                $referencedFiles['slips'][$filename] = true;
+            }
+        }
+
+        $stmt = $pdo->query("SELECT image FROM repair_requests WHERE image IS NOT NULL AND image <> ''");
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $imagePath) {
+            $filename = basename((string) $imagePath);
+            if ($filename !== '' && $filename !== '.') {
+                $referencedFiles['repairs'][$filename] = true;
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('Unable to collect referenced customer upload files: ' . $e->getMessage());
+        return ['removed_files' => 0, 'removed_bytes' => 0];
+    }
+
+    $directories = [
+        'slips' => dirname(__DIR__) . '/uploads/slips',
+        'repairs' => dirname(__DIR__) . '/assets/images/repairs',
+    ];
+    $removedFiles = 0;
+    $removedBytes = 0;
+    // Give a newly uploaded file time to finish its database insert before it
+    // can be considered an orphan by a concurrent cleanup request.
+    $orphanCutoff = time() - 3600;
+
+    foreach ($directories as $type => $directory) {
+        if (!is_dir($directory)) {
+            continue;
+        }
+
+        try {
+            $iterator = new FilesystemIterator($directory, FilesystemIterator::SKIP_DOTS);
+            foreach ($iterator as $fileInfo) {
+                if (!$fileInfo->isFile() || $fileInfo->isLink()) {
+                    continue;
+                }
+
+                $filename = $fileInfo->getBasename();
+                if (isset($referencedFiles[$type][$filename])) {
+                    continue;
+                }
+
+                $fileModifiedAt = $fileInfo->getMTime();
+                if ($fileModifiedAt !== false && $fileModifiedAt > $orphanCutoff) {
+                    continue;
+                }
+
+                $fileSize = $fileInfo->getSize();
+                if (@unlink($fileInfo->getPathname())) {
+                    $removedFiles++;
+                    $removedBytes += (int) $fileSize;
+                }
+            }
+        } catch (Throwable $e) {
+            error_log("Unable to clean orphan {$type} files: " . $e->getMessage());
+        }
+    }
+
+    return [
+        'removed_files' => $removedFiles,
+        'removed_bytes' => $removedBytes,
+    ];
+}
 
 function clearYearlyHeldMonthlyTenantDeposit(PDO $pdo, string $asOfDate): float
 {
@@ -81,7 +165,7 @@ function clearYearlyMonthlyPaidIncomeByMonth(PDO $pdo, string $month): float
 {
     [$monthStart, $nextMonthStart] = monthDateRange($month);
     $stmt = $pdo->prepare("
-        SELECT COALESCE(SUM(CASE WHEN ub.paid_amount > 0 THEN ub.paid_amount ELSE ub.total_amount END), 0) as amount
+        SELECT COALESCE(SUM(ub.total_amount), 0) as amount
         FROM utility_bills ub
         WHERE ub.paid_date >= ?
         AND ub.paid_date < ?
@@ -144,7 +228,7 @@ function clearYearlyMonthlyPaidBalanceByDate(PDO $pdo, string $date): float
 {
     $nextDate = date('Y-m-d', strtotime($date . ' +1 day'));
     $stmt = $pdo->prepare("
-        SELECT COALESCE(SUM(CASE WHEN ub.paid_amount > 0 THEN ub.paid_amount ELSE ub.total_amount END), 0) as amount
+        SELECT COALESCE(SUM(ub.total_amount), 0) as amount
         FROM utility_bills ub
         WHERE ub.created_at < ?
         AND ub.status = 'paid'
@@ -323,6 +407,9 @@ function clearYearlySnapshotDayLimit(int $year, int $month): int
 try {
     $pdo->beginTransaction();
 
+    // Files are removed only after the transaction commits successfully.
+    $attachmentsToDelete = [];
+
     // 1. Get IDs of daily tenants to delete (strictly within the selected year range)
     $stmt = $pdo->prepare("SELECT id FROM daily_tenants WHERE check_in_date >= ? AND check_in_date < ? AND check_out_date >= ? AND check_out_date < ?");
     $stmt->execute([$rangeStart, $rangeEndExclusive, $rangeStart, $rangeEndExclusive]);
@@ -333,12 +420,101 @@ try {
     $stmt->execute([$rangeStart, $rangeEndExclusive, $rangeStart, $rangeEndExclusive]);
     $monthlyTenantIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
-    // Count emails for this year range
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM email_queue WHERE created_at >= ? AND created_at < ?");
-    $stmt->execute([$rangeStart, $rangeEndExclusive]);
-    $emailCount = (int)$stmt->fetchColumn();
+    // Never clear monthly tenants who still have an unpaid utility bill.
+    $protectedMonthlyTenantIds = [];
+    if (!empty($monthlyTenantIds)) {
+        $inQuery = implode(',', array_fill(0, count($monthlyTenantIds), '?'));
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT tenant_id
+            FROM utility_bills
+            WHERE tenant_id IN ($inQuery)
+              AND (status IS NULL OR status <> 'paid')
+        ");
+        $stmt->execute($monthlyTenantIds);
+        $protectedMonthlyTenantIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $monthlyTenantIds = array_values(array_diff($monthlyTenantIds, $protectedMonthlyTenantIds));
+    }
 
-    if (empty($dailyTenantIds) && empty($monthlyTenantIds) && $emailCount === 0) {
+    // Keep payment confirmations belonging to protected monthly tenants as well.
+    $protectedMonthlyBillIds = [];
+    if (!empty($protectedMonthlyTenantIds)) {
+        $inQuery = implode(',', array_fill(0, count($protectedMonthlyTenantIds), '?'));
+        $stmt = $pdo->prepare("SELECT id FROM utility_bills WHERE tenant_id IN ($inQuery)");
+        $stmt->execute($protectedMonthlyTenantIds);
+        $protectedMonthlyBillIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    // Payment confirmations can be linked to daily tenant IDs or monthly utility bill IDs.
+    $monthlyBillIds = [];
+    if (!empty($monthlyTenantIds)) {
+        $inQuery = implode(',', array_fill(0, count($monthlyTenantIds), '?'));
+        $stmt = $pdo->prepare("SELECT id FROM utility_bills WHERE tenant_id IN ($inQuery)");
+        $stmt->execute($monthlyTenantIds);
+        $monthlyBillIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    // Keep payment confirmations that are still waiting for verification.
+    // Only approved/rejected confirmations are considered completed.
+    $processedPaymentConfirmationFilter = "status IN ('approved', 'rejected')";
+    $paymentConfirmationWhere = ["($processedPaymentConfirmationFilter AND created_at >= ? AND created_at < ?)"];
+    $paymentConfirmationParams = [$rangeStart, $rangeEndExclusive];
+
+    if (!empty($dailyTenantIds)) {
+        $inQuery = implode(',', array_fill(0, count($dailyTenantIds), '?'));
+        $paymentConfirmationWhere[] = "($processedPaymentConfirmationFilter AND bill_type = 'daily' AND bill_id IN ($inQuery))";
+        $paymentConfirmationParams = array_merge($paymentConfirmationParams, $dailyTenantIds);
+    }
+
+    if (!empty($monthlyBillIds)) {
+        $inQuery = implode(',', array_fill(0, count($monthlyBillIds), '?'));
+        $paymentConfirmationWhere[] = "($processedPaymentConfirmationFilter AND bill_type = 'monthly' AND bill_id IN ($inQuery))";
+        $paymentConfirmationParams = array_merge($paymentConfirmationParams, $monthlyBillIds);
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT id, slip_image FROM payment_confirmations WHERE ' . implode(' OR ', $paymentConfirmationWhere)
+    );
+    $stmt->execute($paymentConfirmationParams);
+    $paymentConfirmationsToDelete = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!empty($protectedMonthlyBillIds)) {
+        $protectedBillLookup = array_fill_keys(array_map('strval', $protectedMonthlyBillIds), true);
+        $paymentConfirmationsToDelete = array_values(array_filter(
+            $paymentConfirmationsToDelete,
+            static function (array $paymentConfirmation) use ($protectedBillLookup): bool {
+                return !(
+                    ($paymentConfirmation['bill_type'] ?? '') === 'monthly'
+                    && isset($protectedBillLookup[(string)($paymentConfirmation['bill_id'] ?? '')])
+                );
+            }
+        ));
+    }
+
+    foreach ($paymentConfirmationsToDelete as $paymentConfirmation) {
+        if (!empty($paymentConfirmation['slip_image'])) {
+            $attachmentsToDelete[] = dirname(__DIR__) . '/uploads/slips/' . basename($paymentConfirmation['slip_image']);
+        }
+    }
+
+    // Keep repair requests that are still being handled. Only completed or
+    // cancelled requests are considered finished and may be cleared.
+    $stmt = $pdo->prepare(
+        "SELECT id, image FROM repair_requests
+         WHERE created_at >= ? AND created_at < ?
+           AND status IN ('completed', 'cancelled')"
+    );
+    $stmt->execute([$rangeStart, $rangeEndExclusive]);
+    $repairRequestsToDelete = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($repairRequestsToDelete as $repairRequest) {
+        $repairImage = (string)($repairRequest['image'] ?? '');
+        $repairImagePrefix = 'assets/images/repairs/';
+        if ($repairImage !== '' && strpos($repairImage, $repairImagePrefix) === 0) {
+            $attachmentsToDelete[] = dirname(__DIR__) . '/assets/images/repairs/' . basename($repairImage);
+        }
+    }
+
+    if (empty($dailyTenantIds) && empty($monthlyTenantIds) && empty($paymentConfirmationsToDelete) && empty($repairRequestsToDelete)) {
         $pdo->rollBack();
         echo json_encode([
             'success' => false,
@@ -441,7 +617,24 @@ try {
         );
     }
 
-    // 4. Delete invoices and tenants
+    // 4. Delete payment confirmations and repair requests
+    if (!empty($paymentConfirmationsToDelete)) {
+        $paymentConfirmationIds = array_column($paymentConfirmationsToDelete, 'id');
+        $inQuery = implode(',', array_fill(0, count($paymentConfirmationIds), '?'));
+        $stmt = $pdo->prepare("DELETE FROM payment_confirmations WHERE id IN ($inQuery)");
+        $stmt->execute($paymentConfirmationIds);
+    }
+
+    if (!empty($repairRequestsToDelete)) {
+        $repairRequestIds = array_column($repairRequestsToDelete, 'id');
+        $inQuery = implode(',', array_fill(0, count($repairRequestIds), '?'));
+        $stmt = $pdo->prepare("DELETE FROM repair_requests WHERE id IN ($inQuery)");
+        $stmt->execute($repairRequestIds);
+    }
+
+    // 5. Delete invoices and tenants.
+    // Protected monthly tenants are already removed from $monthlyTenantIds above,
+    // so their invoices/invoice_items and utility_bills remain untouched.
     if (!empty($dailyTenantIds)) {
         // Delete invoices for these daily tenants
         $inQuery = implode(',', array_fill(0, count($dailyTenantIds), '?'));
@@ -464,17 +657,35 @@ try {
         $stmt->execute($monthlyTenantIds);
     }
 
-    // 5. Sync room statuses to ensure room states match database status
+    // 6. Sync room statuses to ensure room states match database status
     syncRoomStatuses();
 
-    // 6. Log activity
-    logActivity('clear_yearly_data', 'system', $startYear, "Cleared data for year range $rangeText");
+    // 7. Log activity
+    logActivity(
+        'clear_yearly_data',
+        'system',
+        $startYear,
+        "Cleared data for year range $rangeText; payment confirmations: " . count($paymentConfirmationsToDelete) . "; repair requests: " . count($repairRequestsToDelete) . "; protected unpaid monthly tenants: " . count($protectedMonthlyTenantIds)
+    );
 
     $pdo->commit();
 
+    // Do not leave uploaded slips or repair images behind after their records are removed.
+    foreach (array_unique($attachmentsToDelete) as $attachmentPath) {
+        if (is_file($attachmentPath)) {
+            @unlink($attachmentPath);
+        }
+    }
+
+    // Also remove old files left behind by failed/deleted records, while
+    // preserving every file still referenced by a database record.
+    $orphanCleanup = cleanupOrphanCustomerUploadFiles($pdo);
+
     echo json_encode([
         'success' => true,
-        'message' => t('clear_yearly_success')
+        'message' => t('clear_yearly_success'),
+        'removed_orphan_files' => $orphanCleanup['removed_files'],
+        'removed_orphan_bytes' => $orphanCleanup['removed_bytes']
     ]);
 } catch (Exception $e) {
     if ($pdo->inTransaction()) {

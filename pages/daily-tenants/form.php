@@ -44,8 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $customerTaxId = sanitize($_POST['customer_tax_id'] ?? '');
     $customerAddress = sanitize($_POST['customer_address'] ?? '');
     $customerBranch = sanitize($_POST['customer_branch'] ?? '00000');
-    $checkIn = $_POST['check_in_date'] ?? '';
-    $checkOut = $_POST['check_out_date'] ?? '';
+    $checkIn = normalizeDateFilterValue($_POST['check_in_date'] ?? '');
+    $checkOut = normalizeDateFilterValue($_POST['check_out_date'] ?? '');
     $numGuests = intval($_POST['num_guests'] ?? 1);
     $otherFees = floatval($_POST['other_fees'] ?? 0);
     $notes = sanitize($_POST['notes'] ?? '');
@@ -57,8 +57,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = t('phone_digits_only');
     } elseif (!isValidEmailFormat($email)) {
         $error = t('invalid_email_format');
+    } elseif ($numGuests < 1 || $otherFees < 0) {
+        $error = t('please_enter_all_required');
     } elseif ($checkOut <= $checkIn) {
         $error = t('minimum_one_night_required');
+    } elseif (!isRoomAvailableForPeriod($roomId, $checkIn, $checkOut, $id > 0 ? $id : null)) {
+        $error = $lang === 'en'
+            ? 'The selected room is not available for the chosen period.'
+            : 'ห้องที่เลือกไม่ว่างในช่วงเวลาที่ระบุ';
     } else {
         // Calculate days and amount
         // For hotel booking: check-in day 1 to check-out day 2 = 1 night (1 day)

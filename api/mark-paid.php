@@ -41,8 +41,9 @@ try {
     
     if ($bill) {
         // Update existing bill to paid
-        $stmt = $pdo->prepare("UPDATE utility_bills SET status = 'paid', paid_date = CURDATE(), paid_amount = total_amount WHERE id = ?");
+        $stmt = $pdo->prepare("UPDATE utility_bills SET status = 'paid', paid_date = CURDATE() WHERE id = ?");
         $success = $stmt->execute([$bill['id']]);
+        $billId = (int) $bill['id'];
         $amount = $bill['total_amount'];
     } else {
         // Get tenant info to create bill
@@ -60,16 +61,18 @@ try {
             INSERT INTO utility_bills (
                 tenant_id, room_id, bill_month, bill_date, 
                 rent_amount, water_amount, elec_amount, other_fees, discount, total_amount, 
-                status, paid_date, paid_amount, created_by
+                status, paid_date, created_by
             ) 
-            SELECT mt.id, mt.room_id, ?, CURDATE(), mt.monthly_rent, 0, 0, 0, 0, mt.monthly_rent, 'paid', CURDATE(), mt.monthly_rent, ?
+            SELECT mt.id, mt.room_id, ?, CURDATE(), mt.monthly_rent, 0, 0, 0, 0, mt.monthly_rent, 'paid', CURDATE(), ?
             FROM monthly_tenants mt WHERE mt.id = ?
         ");
         $success = $stmt->execute([$month, $_SESSION['user_id'], $tenantId]);
+        $billId = (int) $pdo->lastInsertId();
         $amount = $tenant['monthly_rent'];
     }
     
     if ($success) {
+        logActivity('mark_paid', 'utility_bill', $billId, "Marked as paid for {$month}");
         logActivity('mark_monthly_paid', 'monthly_tenant', $tenantId, "Marked as paid for {$month}");
         sendMonthlyReceiptEmail($tenantId, $month, 'paid');
 

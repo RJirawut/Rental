@@ -100,15 +100,27 @@ $sql = "SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en, rt.price_mont
         ub.total_amount,
         ub.bill_month,
         ub.status as bill_status,
-        ub_user.username AS bill_created_by_name,
-        mt_user.username AS dt_created_by_name,
+        COALESCE(ub_latest_user.username, ub_creator.username) AS bill_actor_name,
+        COALESCE(mt_latest_user.username, mt_creator.username) AS monthly_tenant_actor_name,
         inv.due_date,
         inv.status as invoice_status,
         DATE_FORMAT(mt.updated_at, '%Y-%m') as termination_month
         FROM monthly_tenants mt
         JOIN rooms r ON mt.room_id = r.id
         JOIN room_types rt ON r.room_type_id = rt.id
-        LEFT JOIN users mt_user ON mt.created_by = mt_user.id
+        LEFT JOIN users mt_creator ON mt.created_by = mt_creator.id
+        LEFT JOIN (
+            SELECT al.entity_id, al.user_id
+            FROM activity_logs al
+            INNER JOIN (
+                SELECT entity_id, MAX(id) AS latest_id
+                FROM activity_logs
+                WHERE entity_type = 'monthly_tenant'
+                    AND action IN ('create_monthly_tenant', 'update_monthly_tenant', 'terminate_monthly_tenant')
+                GROUP BY entity_id
+            ) latest_activity ON latest_activity.latest_id = al.id
+        ) mt_latest_activity ON mt_latest_activity.entity_id = mt.id
+        LEFT JOIN users mt_latest_user ON mt_latest_activity.user_id = mt_latest_user.id
         LEFT JOIN (
             SELECT ub1.*
             FROM utility_bills ub1
@@ -119,7 +131,18 @@ $sql = "SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en, rt.price_mont
                 GROUP BY tenant_id, bill_month
             ) latest_ub ON latest_ub.max_id = ub1.id
         ) ub ON ub.tenant_id = mt.id
-        LEFT JOIN users ub_user ON ub.created_by = ub_user.id
+        LEFT JOIN users ub_creator ON ub.created_by = ub_creator.id
+        LEFT JOIN (
+            SELECT al.entity_id, al.user_id
+            FROM activity_logs al
+            INNER JOIN (
+                SELECT entity_id, MAX(id) AS latest_id
+                FROM activity_logs
+                WHERE entity_type IN ('utility_bill', 'utility_bills')
+                GROUP BY entity_id
+            ) latest_activity ON latest_activity.latest_id = al.id
+        ) ub_latest_activity ON ub_latest_activity.entity_id = ub.id
+        LEFT JOIN users ub_latest_user ON ub_latest_activity.user_id = ub_latest_user.id
         LEFT JOIN (
             SELECT i1.tenant_id, i1.due_date, i1.status
             FROM invoices i1
@@ -474,8 +497,8 @@ include __DIR__ . '/../../includes/header.php';
                         <?php 
                         echo '<span class="badge bg-' . $status['class'] . '">' . $status['label'] . '</span>';
                         
-                        if (!empty($tenant['dt_created_by_name'])) {
-                            echo '<div class="small text-muted mt-1" style="font-size: 0.75rem;">' . t('by') . ': ' . htmlspecialchars($tenant['dt_created_by_name']) . '</div>';
+                        if (!empty($tenant['monthly_tenant_actor_name'])) {
+                            echo '<div class="small text-muted mt-1" style="font-size: 0.75rem;">' . t('by') . ': ' . htmlspecialchars($tenant['monthly_tenant_actor_name']) . '</div>';
                         }
                         ?>
                     </td>
@@ -494,8 +517,8 @@ include __DIR__ . '/../../includes/header.php';
                             echo '<span class="badge bg-secondary">-</span>';
                         }
                         
-                        if (!empty($tenant['bill_created_by_name'])) {
-                            echo '<div class="small text-muted mt-1" style="font-size: 0.75rem;">' . t('by') . ': ' . htmlspecialchars($tenant['bill_created_by_name']) . '</div>';
+                        if (!empty($tenant['bill_actor_name'])) {
+                            echo '<div class="small text-muted mt-1" style="font-size: 0.75rem;">' . t('by') . ': ' . htmlspecialchars($tenant['bill_actor_name']) . '</div>';
                         }
                         ?>
                     </td>
@@ -549,53 +572,13 @@ include __DIR__ . '/../../includes/header.php';
             </tbody>
         </table>
         
-        <!-- Pagination -->
-        <?php if ($totalPages > 1): ?>
-        <div class="d-flex justify-content-between align-items-center mt-3">
-            <div class="text-muted">
-                <?php echo t('showing'); ?> <?php echo (($page - 1) * $itemsPerPage) + 1; ?> - <?php echo min($page * $itemsPerPage, $totalRecords); ?> <?php echo t('of'); ?> <?php echo $totalRecords; ?> <?php echo t('records'); ?>
-            </div>
-            <nav aria-label="Page navigation">
-                <ul class="pagination mb-0">
-                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo $monthFilter ? '&month=' . $monthFilter : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('previous'); ?></a>
-                    </li>
-
-                    <?php
-                    $startPage = max(1, $page - 1);
-                    $endPage = min($totalPages, $page + 1);
-
-                    if ($totalPages > 3) {
-                        if ($page <= 2) {
-                            $startPage = 1;
-                            $endPage = 3;
-                        } elseif ($page >= $totalPages - 1) {
-                            $startPage = $totalPages - 2;
-                            $endPage = $totalPages;
-                        }
-                    }
-
-                    if ($startPage > 1): ?>
-                    <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif;
-
-                    for ($i = $startPage; $i <= $endPage; $i++): ?>
-                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo $monthFilter ? '&month=' . $monthFilter : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo $i; ?></a>
-                    </li>
-                    <?php endfor;
-
-                    if ($endPage < $totalPages): ?>
-                    <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif; ?>
-
-                    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo $monthFilter ? '&month=' . $monthFilter : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . $statusFilter : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('next'); ?></a>
-                    </li>
-                </ul>
-            </nav>
-        </div>
-        <?php endif; ?>
+        <?php renderUnifiedPagination($page, $totalPages, (int)$totalRecords, $itemsPerPage, [
+            'month' => $monthFilter,
+            'search' => $search,
+            'status' => $statusFilter,
+            'sort_by' => $sortBy,
+            'sort_order' => $sortOrder,
+        ], t('monthly_tenants')); ?>
     </div>
 </div>
 

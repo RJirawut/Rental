@@ -46,9 +46,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
                 sendRepairStatusUpdateEmail($repair, $oldStatus, $status, $lang);
             }
             
-            setFlashMessage('success', t('update_success'));
+            setFlashMessage('success', t('update_status_success'));
         } else {
-            setFlashMessage('error', t('update_error'));
+            setFlashMessage('error', t('update_status_error'));
         }
     }
     header('Location: view.php?id=' . $id);

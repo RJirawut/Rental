@@ -210,19 +210,137 @@ function formatBillMonth($billMonth, $lang = null) {
     return $monthName . ' ' . $year;
 }
 
-// Format number
-function formatNumber($number, $decimals = 2) {
-    return number_format($number, $decimals);
-}
-
 // Format currency
 function formatCurrency($amount) {
     return number_format($amount, 2);
 }
 
-// Format currency without .00 for whole numbers (for invoice display)
-function formatCurrencyNoZero($amount) {
-    return number_format($amount, $amount == floor($amount) ? 0 : 2);
+/**
+ * Render the shared pagination layout used by data-heavy list pages.
+ */
+function renderUnifiedPagination(int $page, int $totalPages, int $totalRecords, int $itemsPerPage, array $params = [], string $ariaLabel = 'Page navigation'): void
+{
+    if ($totalPages <= 1) {
+        return;
+    }
+
+    $page = max(1, min($page, $totalPages));
+    $buildUrl = static function (int $targetPage) use ($params): string {
+        $query = $params;
+        $query['page'] = $targetPage;
+        return '?' . http_build_query($query);
+    };
+
+    $startPage = max(1, $page - 1);
+    $endPage = min($totalPages, $page + 1);
+    if ($totalPages > 3) {
+        if ($page <= 2) {
+            $startPage = 1;
+            $endPage = 3;
+        } elseif ($page >= $totalPages - 1) {
+            $startPage = $totalPages - 2;
+            $endPage = $totalPages;
+        }
+    }
+
+    $fromRecord = (($page - 1) * $itemsPerPage) + 1;
+    $toRecord = min($page * $itemsPerPage, $totalRecords);
+    ?>
+    <div class="pagination-unified d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+        <div class="text-muted pagination-unified-summary">
+            <?php echo t('showing'); ?> <?php echo $fromRecord; ?> - <?php echo $toRecord; ?> <?php echo t('of'); ?> <?php echo number_format($totalRecords); ?> <?php echo t('records'); ?>
+        </div>
+        <nav aria-label="<?php echo htmlspecialchars($ariaLabel, ENT_QUOTES, 'UTF-8'); ?>">
+            <ul class="pagination pagination-unified-list mb-0">
+                <li class="page-item pagination-unified-edge <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                    <?php if ($page <= 1): ?>
+                        <span class="page-link"><?php echo t('previous'); ?></span>
+                    <?php else: ?>
+                        <a class="page-link" href="<?php echo htmlspecialchars($buildUrl($page - 1), ENT_QUOTES, 'UTF-8'); ?>"><?php echo t('previous'); ?></a>
+                    <?php endif; ?>
+                </li>
+
+                <?php for ($paginationPage = $startPage; $paginationPage <= $endPage; $paginationPage++): ?>
+                    <li class="page-item <?php echo $paginationPage === $page ? 'active' : ''; ?>">
+                        <a class="page-link" href="<?php echo htmlspecialchars($buildUrl($paginationPage), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $paginationPage; ?></a>
+                    </li>
+                <?php endfor; ?>
+
+                <?php if ($endPage < $totalPages): ?>
+                    <li class="page-item disabled"><span class="page-link">...</span></li>
+                <?php endif; ?>
+
+                <li class="page-item pagination-unified-edge <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
+                    <?php if ($page >= $totalPages): ?>
+                        <span class="page-link"><?php echo t('next'); ?></span>
+                    <?php else: ?>
+                        <a class="page-link" href="<?php echo htmlspecialchars($buildUrl($page + 1), ENT_QUOTES, 'UTF-8'); ?>"><?php echo t('next'); ?></a>
+                    <?php endif; ?>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    <?php
+}
+
+function calculateDirectorySize($directory) {
+    if (!is_dir($directory)) {
+        return 0;
+    }
+
+    $size = 0;
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($iterator as $file) {
+            if ($file->isFile() && !$file->isLink()) {
+                $size += $file->getSize();
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('Unable to calculate directory size: ' . $e->getMessage());
+    }
+
+    return $size;
+}
+
+function formatStorageSize($bytes) {
+    $bytes = max(0, (float) $bytes);
+    $megabyte = 1024 * 1024;
+    $gigabyte = 1024 * $megabyte;
+
+    // Keep the default display in MB and switch to GB near the 1 GB range.
+    if ($bytes >= 900 * $megabyte) {
+        return number_format($bytes / $gigabyte, 2) . ' GB';
+    }
+
+    return number_format($bytes / $megabyte, 2) . ' MB';
+}
+
+function getStorageUsage() {
+    global $pdo;
+
+    $databaseBytes = 0;
+    try {
+        $stmt = $pdo->query("SELECT COALESCE(SUM(data_length), 0) + COALESCE(SUM(index_length), 0) AS database_bytes FROM information_schema.tables WHERE table_schema = DATABASE()");
+        $databaseBytes = (int) $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('Unable to calculate database size: ' . $e->getMessage());
+    }
+
+    $uploadedFilesBytes = calculateDirectorySize(BASE_PATH . 'uploads')
+        + calculateDirectorySize(BASE_PATH . 'assets/images');
+    $totalBytes = $databaseBytes + $uploadedFilesBytes;
+
+    return [
+        'total_bytes' => $totalBytes,
+        'database_bytes' => $databaseBytes,
+        'uploaded_files_bytes' => $uploadedFilesBytes,
+        'total_display' => formatStorageSize($totalBytes),
+        'database_display' => formatStorageSize($databaseBytes),
+        'uploaded_files_display' => formatStorageSize($uploadedFilesBytes),
+    ];
 }
 
 // Generate invoice number
@@ -632,48 +750,6 @@ function getDailyTenantExtraRevenueByMonth($month, $roomTypeMode = null) {
     return (float) $result['extra_amount'];
 }
 
-// Calculate daily tenant status
-function calculateDailyStatus($checkIn, $checkOut, $status = null, $actualCheckIn = null) {
-    $today = date('Y-m-d');
-    $checkIn = date('Y-m-d', strtotime($checkIn));
-    $checkOut = date('Y-m-d', strtotime($checkOut));
-    
-    // If status is provided, use it for accurate status determination
-    if ($status) {
-        if ($status === 'checked_in') {
-            return ['status' => 'staying', 'label' => t('checked_in'), 'class' => 'success'];
-        } elseif ($status === 'checked_out') {
-            return ['status' => 'checked_out', 'label' => t('checked_out'), 'class' => 'secondary'];
-        } elseif ($status === 'no_show') {
-            return ['status' => 'no_show', 'label' => t('no_show'), 'class' => 'danger'];
-        } elseif ($status === 'cancelled') {
-            return ['status' => 'cancelled', 'label' => t('cancelled'), 'class' => 'dark'];
-        }
-    }
-    
-    // If we have actual check-in date, use it for status calculation
-    if ($actualCheckIn) {
-        $actualCheckInDate = date('Y-m-d', strtotime($actualCheckIn));
-        if ($status === 'checked_in' && empty($actualCheckIn)) {
-            return ['status' => 'should_checkin_today', 'label' => t('check_in_today'), 'class' => 'warning'];
-        }
-        return ['status' => 'staying', 'label' => t('checked_in'), 'class' => 'success'];
-    }
-    
-    // Fallback to date-based calculation if no status is provided
-    if ($today < $checkIn) {
-        return ['status' => 'upcoming', 'label' => t('upcoming'), 'class' => 'info'];
-    } elseif ($today == $checkIn) {
-        return ['status' => 'checkin_today', 'label' => t('check_in_today'), 'class' => 'warning'];
-    } elseif ($today > $checkOut) {
-        return ['status' => 'overdue', 'label' => t('overdue_checkout'), 'class' => 'danger'];
-    } elseif ($today == $checkOut) {
-        return ['status' => 'checkout_today', 'label' => t('checkout_today'), 'class' => 'warning'];
-    } else {
-        return ['status' => 'staying', 'label' => t('checked_in'), 'class' => 'success'];
-    }
-}
-
 // Calculate monthly tenant status
 function calculateMonthlyStatus($contractStart, $contractEnd, $status = null) {
     $today = date('Y-m-d');
@@ -707,31 +783,63 @@ function calculateMonthlyStatus($contractStart, $contractEnd, $status = null) {
     }
 }
 
-// Check room availability for daily tenant
-function checkRoomAvailability($roomId, $checkIn, $checkOut, $excludeId = null) {
+/**
+ * Check whether a room can be booked for a half-open date range [start, end).
+ * The same rule is used for daily stays and monthly contracts, so a direct
+ * POST cannot bypass the availability check performed by the browser.
+ */
+function isRoomAvailableForPeriod(int $roomId, string $startDate, string $endDate, ?int $excludeDailyId = null, ?int $excludeMonthlyId = null): bool
+{
     global $pdo;
-    
-    $sql = "SELECT COUNT(*) as count FROM daily_tenants 
-            WHERE room_id = ? 
-            AND status = 'checked_in'
-            AND (
-                (check_in_date <= ? AND check_out_date >= ?) OR
-                (check_in_date <= ? AND check_out_date >= ?) OR
-                (check_in_date >= ? AND check_out_date <= ?)
-            )";
-    
-    $params = [$roomId, $checkIn, $checkIn, $checkOut, $checkOut, $checkIn, $checkOut];
-    
-    if ($excludeId) {
-        $sql .= " AND id != ?";
-        $params[] = $excludeId;
+
+    $startDate = normalizeDateFilterValue($startDate);
+    $endDate = normalizeDateFilterValue($endDate);
+    if ($roomId <= 0 || $startDate === '' || $endDate === '' || $startDate >= $endDate) {
+        return false;
     }
-    
+
+    $dailyExclusion = $excludeDailyId !== null && $excludeDailyId > 0 ? ' AND dt.id != ?' : '';
+    $monthlyExclusion = $excludeMonthlyId !== null && $excludeMonthlyId > 0 ? ' AND mt.id != ?' : '';
+
+    $sql = "
+        SELECT COUNT(*)
+        FROM rooms r
+        WHERE r.id = ?
+          AND r.status != 'maintenance'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM daily_tenants dt
+              WHERE dt.room_id = r.id
+                AND (dt.status IS NULL OR dt.status NOT IN ('cancelled', 'checked_out', 'no_show'))
+                AND dt.check_in_date < ?
+                AND dt.check_out_date > ?
+                {$dailyExclusion}
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM monthly_tenants mt
+              WHERE mt.room_id = r.id
+                AND mt.status IN ('active', 'pending')
+                AND mt.contract_start < ?
+                AND mt.contract_end > ?
+                {$monthlyExclusion}
+          )
+    ";
+
+    $params = [$roomId, $endDate, $startDate];
+    if ($dailyExclusion !== '') {
+        $params[] = $excludeDailyId;
+    }
+    $params[] = $endDate;
+    $params[] = $startDate;
+    if ($monthlyExclusion !== '') {
+        $params[] = $excludeMonthlyId;
+    }
+
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
-    $result = $stmt->fetch();
-    
-    return $result['count'] == 0;
+
+    return (int) $stmt->fetchColumn() > 0;
 }
 
 // Get room status badge
@@ -783,6 +891,7 @@ function logActivity($action, $entityType = null, $entityId = null, $description
 function getSettings() {
     global $pdo;
     ensureRentalTypeColumns();
+    ensureSettingsPinColumn();
     $stmt = $pdo->query("SELECT * FROM settings LIMIT 1");
     return $stmt->fetch();
 }
@@ -807,6 +916,24 @@ function ensureRentalTypeColumns() {
         if (!in_array($column, $existingColumns)) {
             $pdo->exec("ALTER TABLE settings ADD COLUMN {$column} {$definition}");
         }
+    }
+
+    $checked = true;
+}
+
+function ensureSettingsPinColumn() {
+    global $pdo;
+
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    $stmt = $pdo->query("SHOW COLUMNS FROM settings");
+    $existingColumns = array_column($stmt->fetchAll(), 'Field');
+
+    if (!in_array('pin', $existingColumns, true)) {
+        $pdo->exec("ALTER TABLE settings ADD COLUMN pin VARCHAR(255) DEFAULT NULL AFTER primary_color");
     }
 
     $checked = true;
@@ -891,13 +1018,6 @@ function getPasswordResetRequest($token) {
         LIMIT 1");
     $stmt->execute([$tokenHash]);
     return $stmt->fetch() ?: null;
-}
-
-function markPasswordResetTokenUsed($resetId) {
-    global $pdo;
-
-    $stmt = $pdo->prepare("UPDATE password_resets SET used_at = NOW() WHERE id = ?");
-    $stmt->execute([$resetId]);
 }
 
 // Ensure SMTP columns exist in settings table (auto-migration)
@@ -1238,32 +1358,6 @@ function suspendUserAccount(int $userId, string $reason = 'pin_failures'): bool 
     $user['account_status'] = 'suspended';
     sendAccountSuspendedEmail($user, $reason);
     logActivity('suspend_user_account', 'user', $userId, $reason);
-
-    return true;
-}
-
-function reactivateUserAccount(int $userId, bool $sendEmail = true): bool {
-    global $pdo;
-
-    ensureUserSecurityColumns();
-
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? AND is_active = 1 LIMIT 1");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch();
-
-    if (!$user || ($user['account_status'] ?? 'active') === 'active') {
-        return false;
-    }
-
-    $stmt = $pdo->prepare("UPDATE users SET account_status = 'active', pin_failed_attempts = 0 WHERE id = ?");
-    $stmt->execute([$userId]);
-
-    if ($sendEmail) {
-        $user['account_status'] = 'active';
-        sendAccountReactivatedEmail($user);
-    }
-
-    logActivity('reactivate_user_account', 'user', $userId);
 
     return true;
 }
@@ -1633,6 +1727,26 @@ function ensureUtilityBillMeterResetColumns() {
     $checked = true;
 }
 
+// Resolve the sender details consistently for test, queued, and system emails.
+function getSmtpSenderDetails($settings) {
+    $settings = is_array($settings) ? $settings : [];
+
+    $fromEmail = trim((string) ($settings['smtp_from_email'] ?? ''));
+    if ($fromEmail === '') {
+        $fromEmail = trim((string) ($settings['smtp_username'] ?? ''));
+    }
+
+    $fromName = trim((string) ($settings['smtp_from_name'] ?? ''));
+    if ($fromName === '') {
+        $fromName = trim((string) ($settings['dorm_name'] ?? ''));
+    }
+    if ($fromName === '') {
+        $fromName = 'Rental System';
+    }
+
+    return [$fromEmail, $fromName];
+}
+
 // Create a configured PHPMailer instance from settings
 function getSmtpMailer($settings = null) {
     if (!$settings) {
@@ -1667,8 +1781,7 @@ function getSmtpMailer($settings = null) {
         $mail->SMTPAutoTLS = false;
     }
 
-    $fromEmail = trim($settings['smtp_from_email'] ?? $settings['smtp_username'] ?? '');
-    $fromName  = trim($settings['smtp_from_name'] ?? $settings['dorm_name'] ?? 'Rental System');
+    [$fromEmail, $fromName] = getSmtpSenderDetails($settings);
     if (filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
         $mail->setFrom($fromEmail, $fromName);
     }
@@ -1791,7 +1904,7 @@ function sendTestEmail($toEmail, $smtpConfig = null) {
         $smtpConfig = getSettings();
     }
 
-    $appName = $smtpConfig['dorm_name'] ?? 'Rental System';
+    $appName = trim((string) ($smtpConfig['dorm_name'] ?? '')) ?: 'Rental System';
 
     $mail = new PHPMailer\PHPMailer\PHPMailer(true);
     $mail->isSMTP();
@@ -1812,8 +1925,7 @@ function sendTestEmail($toEmail, $smtpConfig = null) {
         $mail->SMTPAutoTLS = false;
     }
 
-    $fromEmail = trim($smtpConfig['smtp_from_email'] ?? $smtpConfig['smtp_username'] ?? '');
-    $fromName  = trim($smtpConfig['smtp_from_name'] ?? $appName);
+    [$fromEmail, $fromName] = getSmtpSenderDetails($smtpConfig);
     $mail->setFrom($fromEmail, $fromName);
     $mail->addAddress($toEmail);
     $mail->isHTML(true);
@@ -1918,48 +2030,64 @@ function getCurrentUser() {
     return null;
 }
 
-// Upload image
-function uploadImage($file, $directory = 'logo/') {
-    if ($file['error'] !== UPLOAD_ERR_OK) {
+/**
+ * Store a verified image in an absolute directory outside the code path.
+ */
+function uploadVerifiedImage($file, string $uploadDirectory, array $allowedTypes): array
+{
+    if (!is_array($file)
+        || !isset($file['error'], $file['tmp_name'], $file['size'])
+        || $file['error'] !== UPLOAD_ERR_OK
+        || !is_uploaded_file($file['tmp_name'])) {
         return ['success' => false, 'message' => 'Upload failed'];
     }
-    
-    $allowedTypes = [
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/gif' => 'gif',
-        'image/webp' => 'webp'
-    ];
+
+    $maxSize = 5 * 1024 * 1024;
+    if (!is_numeric($file['size']) || (int) $file['size'] <= 0 || (int) $file['size'] > $maxSize) {
+        return ['success' => false, 'message' => 'File too large'];
+    }
 
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mimeType = $finfo->file($file['tmp_name']);
     if (!isset($allowedTypes[$mimeType]) || @getimagesize($file['tmp_name']) === false) {
         return ['success' => false, 'message' => 'Invalid file type'];
     }
-    
-    $maxSize = 5 * 1024 * 1024; // 5MB
-    if ($file['size'] > $maxSize) {
-        return ['success' => false, 'message' => 'File too large'];
-    }
-    
-    $directory = trim(str_replace(['\\', "\0"], '/', $directory), '/') . '/';
-    if (strpos($directory, '..') !== false) {
-        return ['success' => false, 'message' => 'Invalid upload directory'];
-    }
 
-    $uploadDirectory = UPLOAD_PATH . $directory;
     if (!is_dir($uploadDirectory) && !mkdir($uploadDirectory, 0755, true)) {
         return ['success' => false, 'message' => 'Upload directory is not writable'];
     }
 
     $filename = bin2hex(random_bytes(16)) . '.' . $allowedTypes[$mimeType];
-    $uploadPath = $uploadDirectory . $filename;
-    
-    if (move_uploaded_file($file['tmp_name'], $uploadPath)) {
+    if (move_uploaded_file($file['tmp_name'], rtrim($uploadDirectory, '/\\') . DIRECTORY_SEPARATOR . $filename)) {
         return ['success' => true, 'filename' => $filename];
     }
-    
+
     return ['success' => false, 'message' => 'Failed to move file'];
+}
+
+// Upload image used by settings and repair requests.
+function uploadImage($file, $directory = 'logo/') {
+    $directory = trim(str_replace(['\\', "\0"], '/', $directory), '/') . '/';
+    if (strpos($directory, '..') !== false) {
+        return ['success' => false, 'message' => 'Invalid upload directory'];
+    }
+
+    return uploadVerifiedImage($file, UPLOAD_PATH . $directory, [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/gif' => 'gif',
+        'image/webp' => 'webp',
+    ]);
+}
+
+// Payment slips intentionally exclude animated GIF files.
+function uploadPaymentSlip($file): array
+{
+    return uploadVerifiedImage($file, BASE_PATH . 'uploads/slips/', [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+    ]);
 }
 
 // Update room status based on tenant occupancy
@@ -2086,8 +2214,60 @@ function ensurePaymentColumns() {
 }
 
 function ensurePaymentConfirmationsTable() {
-    // Deprecated: payment confirmations table removed
-    return;
+    global $pdo;
+    static $checked = false;
+    if ($checked) return;
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS payment_confirmations (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            bill_type ENUM('monthly','daily') NOT NULL,
+            bill_id INT NOT NULL,
+            room_number VARCHAR(20) DEFAULT NULL,
+            tenant_name VARCHAR(100) NOT NULL,
+            amount DECIMAL(10,2) NOT NULL,
+            payment_method VARCHAR(50) NOT NULL DEFAULT 'promptpay',
+            transfer_date DATE DEFAULT NULL,
+            transfer_time TIME DEFAULT NULL,
+            slip_image VARCHAR(255) DEFAULT NULL,
+            status ENUM('pending_verify', 'approved', 'rejected') NOT NULL DEFAULT 'pending_verify',
+            admin_note TEXT DEFAULT NULL,
+            verified_by INT DEFAULT NULL,
+            verified_at DATETIME DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_pc_status (status),
+            INDEX idx_pc_bill (bill_type, bill_id),
+            INDEX idx_pc_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $columnsToCheck = [
+        'room_number' => "ALTER TABLE payment_confirmations ADD COLUMN room_number VARCHAR(20) DEFAULT NULL AFTER bill_id",
+        'transfer_date' => "ALTER TABLE payment_confirmations ADD COLUMN transfer_date DATE DEFAULT NULL AFTER payment_method",
+        'transfer_time' => "ALTER TABLE payment_confirmations ADD COLUMN transfer_time TIME DEFAULT NULL AFTER transfer_date",
+    ];
+
+    foreach ($columnsToCheck as $col => $alterSql) {
+        try {
+            $stmt = $pdo->query("SHOW COLUMNS FROM payment_confirmations LIKE '{$col}'");
+            if ($stmt->rowCount() === 0) {
+                $pdo->exec($alterSql);
+            }
+        } catch (Exception $e) {}
+    }
+
+    try {
+        $stmt = $pdo->query("SHOW INDEX FROM payment_confirmations WHERE Key_name = 'idx_pc_created'");
+        if (!$stmt->fetch()) {
+            $pdo->exec("ALTER TABLE payment_confirmations ADD INDEX idx_pc_created (created_at)");
+        }
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), 'Duplicate key name') === false) {
+            error_log('Payment confirmation created_at index failed: ' . $e->getMessage());
+        }
+    }
+
+    $checked = true;
 }
 
 function ensurePaymentTokenColumn() {
@@ -2203,6 +2383,38 @@ function getDailyTenantByPaymentToken(string $token): ?array {
     $stmt->execute([$token]);
     $result = $stmt->fetch();
     return $result ?: null;
+}
+
+/**
+ * Return the current, server-calculated amount for a bill that can receive a
+ * public payment confirmation. Browser-submitted bill values are never used
+ * as the source of truth.
+ */
+function getPayableBillForConfirmation(string $billType, int $billId): ?array
+{
+    global $pdo;
+
+    if ($billId <= 0) {
+        return null;
+    }
+
+    if ($billType === 'monthly') {
+        $stmt = $pdo->prepare("\n            SELECT ub.id, r.room_number, mt.tenant_name, ub.total_amount AS amount_due\n            FROM utility_bills ub\n            INNER JOIN monthly_tenants mt ON mt.id = ub.tenant_id\n            INNER JOIN rooms r ON r.id = ub.room_id\n            WHERE ub.id = ?\n              AND ub.status IN ('unpaid', 'overdue')\n        ");
+        $stmt->execute([$billId]);
+        $bill = $stmt->fetch();
+
+        return $bill && (float) $bill['amount_due'] > 0 ? $bill : null;
+    }
+
+    if ($billType === 'daily') {
+        $stmt = $pdo->prepare("\n            SELECT dt.id, r.room_number, dt.guest_name AS tenant_name,\n                   COALESCE(latest_invoice.grand_total, dt.total_amount) AS amount_due\n            FROM daily_tenants dt\n            INNER JOIN rooms r ON r.id = dt.room_id\n            LEFT JOIN invoices latest_invoice ON latest_invoice.id = (\n                SELECT i.id\n                FROM invoices i\n                WHERE i.tenant_type = 'daily' AND i.tenant_id = dt.id\n                ORDER BY i.id DESC\n                LIMIT 1\n            )\n            WHERE dt.id = ? AND dt.status = 'pending_payment'\n        ");
+        $stmt->execute([$billId]);
+        $bill = $stmt->fetch();
+
+        return $bill && (float) $bill['amount_due'] > 0 ? $bill : null;
+    }
+
+    return null;
 }
 
 function ensureRepairRequestsTable() {
@@ -2443,4 +2655,210 @@ function buildRepairStatusUpdateHtml($repairData, $oldStatus, $newStatus, $track
 </body>
 </html>
 HTML;
+}
+
+
+/**
+ * Get count of pending payment confirmations requiring verification.
+ */
+function getPendingPaymentConfirmationsCount() {
+    global $pdo;
+    try {
+        ensurePaymentConfirmationsTable();
+        $stmt = $pdo->query("SELECT COUNT(*) FROM payment_confirmations WHERE status = 'pending_verify'");
+        return (int) $stmt->fetchColumn();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+/**
+ * Get payment confirmations list with filters.
+ */
+function getPaymentConfirmations($statusFilter = 'all', $typeFilter = 'all', $search = '', $limit = 50, $offset = 0, $sortBy = 'created_at', $sortOrder = 'DESC') {
+    global $pdo;
+    ensurePaymentConfirmationsTable();
+
+    $where = [];
+    $params = [];
+
+    if ($statusFilter !== 'all' && !empty($statusFilter)) {
+        $where[] = "pc.status = ?";
+        $params[] = $statusFilter;
+    }
+
+    if ($typeFilter !== 'all' && !empty($typeFilter)) {
+        $where[] = "pc.bill_type = ?";
+        $params[] = $typeFilter;
+    }
+
+    if (!empty($search)) {
+        $where[] = "(pc.tenant_name LIKE ? OR pc.room_number LIKE ? OR pc.amount LIKE ?)";
+        $params[] = "%{$search}%";
+        $params[] = "%{$search}%";
+        $params[] = "%{$search}%";
+    }
+
+    $whereSql = !empty($where) ? "WHERE " . implode(" AND ", $where) : "";
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM payment_confirmations pc {$whereSql}");
+    $countStmt->execute($params);
+    $totalRecords = (int) $countStmt->fetchColumn();
+
+    // Validate sort column
+    $allowedSort = ['room_number', 'tenant_name', 'bill_type', 'amount', 'transfer_date', 'status', 'created_at'];
+    if (!in_array($sortBy, $allowedSort, true)) {
+        $sortBy = 'created_at';
+    }
+    $sortOrder = strtoupper($sortOrder) === 'ASC' ? 'ASC' : 'DESC';
+
+    // Use custom sort if no explicit sort requested
+    if ($sortBy === 'created_at' && $sortOrder === 'DESC' && !isset($_GET['sort_by'])) {
+        $orderClause = "ORDER BY CASE WHEN pc.status = 'pending_verify' THEN 0 ELSE 1 END, pc.created_at DESC";
+    } else {
+        $orderClause = "ORDER BY pc.{$sortBy} {$sortOrder}";
+    }
+
+    $sql = "
+        SELECT pc.*, u.username AS verifier_name
+        FROM payment_confirmations pc
+        LEFT JOIN users u ON pc.verified_by = u.id
+        {$whereSql}
+        {$orderClause}
+        LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $records = $stmt->fetchAll();
+
+    return [
+        'records' => $records,
+        'total' => $totalRecords
+    ];
+}
+
+/**
+ * Approve a payment confirmation and update bill status.
+ */
+function approvePaymentConfirmation($id, $adminUserId = null, $note = '') {
+    global $pdo;
+    ensurePaymentConfirmationsTable();
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmtItem = $pdo->prepare("SELECT * FROM payment_confirmations WHERE id = ? FOR UPDATE");
+        $stmtItem->execute([(int) $id]);
+        $item = $stmtItem->fetch();
+        if (!$item) {
+            throw new RuntimeException('Record not found');
+        }
+        if ($item['status'] !== 'pending_verify') {
+            throw new RuntimeException('Only pending payment confirmations can be approved');
+        }
+
+        $slipAmount = (float) $item['amount'];
+        if ($slipAmount <= 0) {
+            throw new RuntimeException('Invalid payment amount');
+        }
+
+        if ($item['bill_type'] === 'monthly') {
+            $stmtBill = $pdo->prepare("SELECT * FROM utility_bills WHERE id = ? FOR UPDATE");
+            $stmtBill->execute([$item['bill_id']]);
+            $bill = $stmtBill->fetch();
+
+            if (!$bill) {
+                throw new RuntimeException('The monthly bill no longer exists');
+            }
+
+            $totalBill = (float) $bill['total_amount'];
+            if ($bill['status'] === 'paid') {
+                throw new RuntimeException('This bill is already fully paid');
+            }
+            if (abs($slipAmount - $totalBill) > 0.01) {
+                throw new RuntimeException('The payment amount does not match the bill total');
+            }
+
+            $stmtUpdateBill = $pdo->prepare("
+                UPDATE utility_bills
+                SET status = 'paid', paid_date = CURDATE()
+                WHERE id = ?
+            ");
+            $stmtUpdateBill->execute([$item['bill_id']]);
+        } elseif ($item['bill_type'] === 'daily') {
+            $stmtDaily = $pdo->prepare("SELECT * FROM daily_tenants WHERE id = ? FOR UPDATE");
+            $stmtDaily->execute([$item['bill_id']]);
+            $daily = $stmtDaily->fetch();
+
+            if (!$daily || $daily['status'] !== 'pending_payment') {
+                throw new RuntimeException('This daily booking is no longer awaiting payment');
+            }
+
+            $expectedAmount = (float) $daily['total_amount'];
+            if (abs($slipAmount - $expectedAmount) > 0.01) {
+                throw new RuntimeException('The payment amount does not match the booking total');
+            }
+
+            $stmtUpdateDaily = $pdo->prepare("
+                UPDATE daily_tenants
+                SET status = NULL, payment_deadline = NULL
+                WHERE id = ?
+            ");
+            $stmtUpdateDaily->execute([$item['bill_id']]);
+
+            if (function_exists('syncRoomStatuses')) {
+                syncRoomStatuses();
+            }
+        } else {
+            throw new RuntimeException('Invalid bill type');
+        }
+
+        $stmtUpdatePc = $pdo->prepare("
+            UPDATE payment_confirmations
+            SET status = 'approved', admin_note = ?, verified_by = ?, verified_at = NOW()
+            WHERE id = ? AND status = 'pending_verify'
+        ");
+        $stmtUpdatePc->execute([$note, $adminUserId, $id]);
+        if ($stmtUpdatePc->rowCount() !== 1) {
+            throw new RuntimeException('Payment confirmation was updated by another request');
+        }
+
+        $pdo->commit();
+        logActivity('approve_payment_slip', 'payment_confirmations', $id, "Approved payment confirmation #{$id} of amount {$item['amount']}");
+
+        return ['success' => true, 'message' => 'Payment approved successfully'];
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('Payment approval failed: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
+ * Reject a payment confirmation.
+ */
+function rejectPaymentConfirmation($id, $adminUserId = null, $note = '') {
+    global $pdo;
+    ensurePaymentConfirmationsTable();
+
+    try {
+        $stmtUpdatePc = $pdo->prepare("
+            UPDATE payment_confirmations
+            SET status = 'rejected', admin_note = ?, verified_by = ?, verified_at = NOW()
+            WHERE id = ? AND status = 'pending_verify'
+        ");
+        $stmtUpdatePc->execute([$note, $adminUserId, $id]);
+        if ($stmtUpdatePc->rowCount() !== 1) {
+            return ['success' => false, 'message' => 'Only pending payment confirmations can be rejected'];
+        }
+
+        logActivity('reject_payment_slip', 'payment_confirmations', $id, "Rejected payment confirmation #{$id}: {$note}");
+
+        return ['success' => true, 'message' => 'Payment confirmation rejected'];
+    } catch (Exception $e) {
+        error_log('Payment rejection failed: ' . $e->getMessage());
+        return ['success' => false, 'message' => 'Unable to reject payment confirmation'];
+    }
 }

@@ -508,37 +508,6 @@ function buildReceiptDocumentBodyHtml(array $ctx, ?string $logoSrc): string
 HTML;
 }
 
-function sendReceiptEmailMessage($mail, string $toEmail, string $toName, string $subject, string $htmlBody, string $plainBody): bool
-{
-    if (!$mail || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
-        return false;
-    }
-
-    try {
-        $mail->addAddress($toEmail, $toName);
-        $mail->isHTML(true);
-        $mail->Subject = $subject;
-        $mail->Body = $htmlBody;
-        $mail->AltBody = $plainBody;
-        return $mail->send();
-    } catch (Exception $e) {
-        error_log('Receipt email error: ' . $e->getMessage());
-        return false;
-    }
-}
-
-function resolveReceiptLogoSrc($mail, ?array $settings = null): ?string
-{
-    if ($mail) {
-        $logoSrc = attachEmailLogo($mail, $settings);
-        if ($logoSrc) {
-            return $logoSrc;
-        }
-    }
-
-    return getEmailLogoUrl($settings);
-}
-
 function sendDailyReceiptEmail(int $tenantId, string $stage): bool
 {
     global $lang;
@@ -725,13 +694,14 @@ function sendMonthlyOutstandingBalanceNotificationEmail(int $tenantId, string $b
         ]
     );
 
-    $qrBlockHtml = '';
-    if (!empty($settings['promptpay_id'])) {
-        ensurePaymentTokenColumn();
+    $paymentButtonHtml = '';
+    if (!empty($bill['id'])) {
         $token = getOrCreatePaymentToken((int)$bill['id']);
         $paymentUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment.php?token=' . $token);
-        $totalBillAmount = (float)$bill['water_amount'] + (float)$bill['elec_amount'];
-        $qrBlockHtml = buildPaymentQRBlockHtml($settings, $totalBillAmount, $paymentUrl);
+        $paymentButtonHtml = '<div style="text-align:center;margin:24px 0 16px;">'
+            . '<a href="' . htmlspecialchars($paymentUrl, ENT_QUOTES, 'UTF-8') . '" style="display:inline-block;background:#0d6efd;color:#ffffff;text-decoration:none;font-weight:600;font-size:16px;padding:12px 32px;border-radius:50px;box-shadow:0 4px 12px rgba(13,110,253,0.3);">'
+            . ($isEnglish ? 'Pay Now' : 'ชำระเงิน') . '</a>'
+            . '</div>';
     }
 
     $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
@@ -757,7 +727,7 @@ function sendMonthlyOutstandingBalanceNotificationEmail(int $tenantId, string $b
 <p style="margin:4px 0;color:#333;font-size:14px;"><strong>ยอดรวม:</strong> {\$totalAmount}</p>
 </div>
 <p style="margin:0 0 16px;color:#555;font-size:15px;line-height:1.6;">กรุณาชำระตามกำหนด</p>
-{\$qrBlockHtml}
+{\$paymentButtonHtml}
 {$repairFormLink}
 </td></tr>
 <tr><td style="background:#f8f9fa;padding:16px 28px;text-align:center;border-top:1px solid #eee;">
@@ -880,13 +850,14 @@ function sendDailyPendingPaymentEmail(int $tenantId): bool
     $logoSrc = getEmailLogoUrl($settings);
     $receiptBody = buildReceiptDocumentBodyHtml($ctx, $logoSrc);
 
-    // Add QR Code payment block for pending daily payments
-    if (!empty($settings['promptpay_id'])) {
-        ensureDailyTenantPaymentTokenColumn();
-        $token = getOrCreateDailyTenantPaymentToken((int) $tenantId);
+    // Add Pay Now button for pending daily payments
+    if (!empty($tenant['id'])) {
+        $token = getOrCreateDailyTenantPaymentToken((int)$tenant['id']);
         $paymentUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment.php?token=' . $token);
-        $qrBlock = buildPaymentQRBlockHtml($settings, $ctx['grand_total'], $paymentUrl);
-        $receiptBody .= $qrBlock;
+        $receiptBody .= '<div style="text-align:center;margin:24px 0 16px;">'
+            . '<a href="' . htmlspecialchars($paymentUrl, ENT_QUOTES, 'UTF-8') . '" style="display:inline-block;background:#0d6efd;color:#ffffff;text-decoration:none;font-weight:600;font-size:16px;padding:12px 32px;border-radius:50px;box-shadow:0 4px 12px rgba(13,110,253,0.3);">'
+            . ($isEnglish ? 'Pay Now' : 'ชำระเงิน') . '</a>'
+            . '</div>';
     }
 
     if ($isEnglish) {
@@ -932,13 +903,14 @@ function sendMonthlyReceiptEmail(int $tenantId, string $billMonth, string $payme
     $logoSrc = getEmailLogoUrl($settings);
     $receiptBody = buildReceiptDocumentBodyHtml($ctx, $logoSrc);
     
-    // Add QR Code payment block for unpaid bills
-    if ($paymentStage === 'unpaid' && !empty($settings['promptpay_id']) && !empty($ctx['bill'])) {
-        ensurePaymentTokenColumn();
+    // Add Pay Now button for unpaid bills
+    if ($paymentStage === 'unpaid' && !empty($ctx['bill']['id'])) {
         $token = getOrCreatePaymentToken((int)$ctx['bill']['id']);
         $paymentUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment.php?token=' . $token);
-        $qrBlock = buildPaymentQRBlockHtml($settings, $ctx['grand_total'], $paymentUrl);
-        $receiptBody .= $qrBlock;
+        $receiptBody .= '<div style="text-align:center;margin:24px 0 16px;">'
+            . '<a href="' . htmlspecialchars($paymentUrl, ENT_QUOTES, 'UTF-8') . '" style="display:inline-block;background:#0d6efd;color:#ffffff;text-decoration:none;font-weight:600;font-size:16px;padding:12px 32px;border-radius:50px;box-shadow:0 4px 12px rgba(13,110,253,0.3);">'
+            . ($isEnglish ? 'Pay Now' : 'ชำระเงิน') . '</a>'
+            . '</div>';
     }
     $intro = $paymentStage === 'paid'
         ? t('receipt_email_intro_monthly_paid')

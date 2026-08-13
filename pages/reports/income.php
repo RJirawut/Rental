@@ -126,7 +126,7 @@ if ($type === 'monthly') {
 
         // monthly paid (running balance up to currentDate)
         $stmt = $pdo->prepare("
-            SELECT COALESCE(SUM(CASE WHEN ub.paid_amount > 0 THEN ub.paid_amount ELSE ub.total_amount END), 0) as amount
+            SELECT COALESCE(SUM(ub.total_amount), 0) as amount
             FROM utility_bills ub
             WHERE DATE(ub.created_at) <= ?
             AND ub.status = 'paid'
@@ -208,7 +208,7 @@ if ($type === 'monthly') {
         $liveDailyExtraIncome = getDailyTenantExtraRevenueByMonth($monthStr);
 
         $stmt = $pdo->prepare("
-            SELECT COALESCE(SUM(CASE WHEN ub.paid_amount > 0 THEN ub.paid_amount ELSE ub.total_amount END), 0) as amount
+            SELECT COALESCE(SUM(ub.total_amount), 0) as amount
             FROM utility_bills ub
             WHERE DATE_FORMAT(ub.paid_date, '%Y-%m') = ?
             AND ub.status = 'paid'
@@ -419,7 +419,7 @@ include __DIR__ . '/../../includes/header.php';
         <div class="stat-card-item">
             <div class="card bg-success text-white">
                 <div class="card-body text-center">
-                    <h6><?php echo t('paid_amount'); ?></h6>
+                    <h6><?php echo t('paid_total'); ?></h6>
                     <h3><?php echo formatCurrency($totalMonthly); ?></h3>
                 </div>
             </div>
@@ -439,7 +439,7 @@ include __DIR__ . '/../../includes/header.php';
         <div class="stat-card-item">
             <div class="card bg-warning text-white">
                 <div class="card-body text-center">
-                    <h6><?php echo t('unpaid_amount'); ?></h6>
+                    <h6><?php echo t('unpaid_total'); ?></h6>
                     <h3><?php echo formatCurrency($totalMonthlyUnpaid); ?></h3>
                 </div>
             </div>
@@ -587,8 +587,8 @@ include __DIR__ . '/../../includes/header.php';
                     <thead class="table-light">
                         <tr>
                             <th><?php echo $type === 'monthly' ? t('month') : t('year'); ?></th>
-                            <th class="text-end"><?php echo t('paid_amount'); ?></th>
-                            <th class="text-end"><?php echo t('unpaid_amount'); ?></th>
+                            <th class="text-end"><?php echo t('paid_total'); ?></th>
+                            <th class="text-end"><?php echo t('unpaid_total'); ?></th>
                             <th class="text-end"><?php echo t('deposit'); ?></th>
                             <th class="text-end"><?php echo t('monthly_income_total'); ?></th>
                         </tr>
@@ -650,7 +650,7 @@ if ($settings['enable_daily'] ?? 1) {
 }
 if ($settings['enable_monthly'] ?? 1) {
     $chartDatasets[] = [
-        'label' => t('paid_amount'),
+        'label' => t('paid_total'),
         'data' => array_map(function($d) { return (float)($d['monthly'] ?? 0); }, $incomeData),
         'borderColor' => 'rgba(25, 135, 84, 1)',
         'backgroundColor' => 'rgba(25, 135, 84, 0.1)',
@@ -659,7 +659,7 @@ if ($settings['enable_monthly'] ?? 1) {
         'fill' => true
     ];
     $chartDatasets[] = [
-        'label' => t('unpaid_amount'),
+        'label' => t('unpaid_total'),
         'data' => array_map(function($d) { return (float)($d['monthly_unpaid'] ?? 0); }, $incomeData),
         'borderColor' => 'rgba(220, 53, 69, 1)',
         'backgroundColor' => 'rgba(220, 53, 69, 0.1)',

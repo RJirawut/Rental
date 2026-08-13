@@ -15,7 +15,8 @@ CREATE TABLE users (
     account_status ENUM('active', 'suspended') NOT NULL DEFAULT 'active',
     pin_failed_attempts INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_users_active_status (is_active, account_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Password Reset Tokens Table
@@ -51,6 +52,10 @@ CREATE TABLE settings (
     vat_rate DECIMAL(5,2) DEFAULT 7.00,
     payment_due_day INT DEFAULT 5,
     primary_color VARCHAR(7) DEFAULT '#0d6efd',
+    enable_daily TINYINT(1) DEFAULT 1,
+    enable_monthly TINYINT(1) DEFAULT 1,
+    daily_payment_deadline_hours INT NOT NULL DEFAULT 24,
+    pin VARCHAR(255) DEFAULT NULL,
     smtp_host VARCHAR(255) DEFAULT NULL,
     smtp_port INT DEFAULT 587,
     smtp_username VARCHAR(255) DEFAULT NULL,
@@ -58,6 +63,12 @@ CREATE TABLE settings (
     smtp_encryption VARCHAR(10) DEFAULT 'tls',
     smtp_from_email VARCHAR(255) DEFAULT NULL,
     smtp_from_name VARCHAR(255) DEFAULT NULL,
+    email_enabled TINYINT(1) DEFAULT 1,
+    promptpay_id VARCHAR(20) DEFAULT NULL,
+    promptpay_name VARCHAR(100) DEFAULT NULL,
+    bank_account_name VARCHAR(100) DEFAULT NULL,
+    bank_account_number VARCHAR(30) DEFAULT NULL,
+    bank_name VARCHAR(100) DEFAULT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -72,7 +83,8 @@ CREATE TABLE room_types (
     description_en TEXT,
     is_active TINYINT(1) DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_room_types_active_name (is_active, type_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Rooms Table
@@ -109,9 +121,12 @@ CREATE TABLE daily_tenants (
     daily_rate DECIMAL(10,2) NOT NULL,
     total_days INT NOT NULL,
     total_amount DECIMAL(10,2) NOT NULL,
+    other_fees DECIMAL(10,2) DEFAULT 0,
     deposit DECIMAL(10,2) DEFAULT 0,
-    status ENUM('checked_in', 'checked_out', 'no_show', 'cancelled') DEFAULT 'checked_in',
+    status ENUM('checked_in', 'checked_out', 'no_show', 'cancelled', 'pending_payment') DEFAULT NULL,
     cancel_refunded TINYINT(1) NOT NULL DEFAULT 0,
+    payment_deadline DATETIME NULL,
+    payment_token VARCHAR(64) DEFAULT NULL,
     notes TEXT,
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -122,6 +137,7 @@ CREATE TABLE daily_tenants (
     INDEX idx_daily_updated_at (updated_at),
     INDEX idx_daily_actual_checkout (actual_check_out_date, status),
     INDEX idx_daily_email (email),
+    UNIQUE KEY idx_dt_payment_token (payment_token),
     FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -181,19 +197,20 @@ CREATE TABLE utility_bills (
     other_fees DECIMAL(10,2) DEFAULT 0.00,
     discount DECIMAL(10,2) DEFAULT 0.00,
     total_amount DECIMAL(10,2) NOT NULL,
-    status ENUM('unpaid', 'paid', 'partial', 'overdue') DEFAULT 'unpaid',
+    status ENUM('unpaid', 'paid', 'overdue') DEFAULT 'unpaid',
     paid_date DATE,
-    paid_amount DECIMAL(10,2) DEFAULT 0.00,
     notes TEXT,
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    payment_token VARCHAR(64) DEFAULT NULL,
     INDEX idx_utility_tenant_month_id (tenant_id, bill_month, id),
     INDEX idx_utility_month_tenant_id (bill_month, tenant_id, id),
     INDEX idx_utility_status_month (status, bill_month),
     INDEX idx_utility_status_paid_date (status, paid_date),
     INDEX idx_utility_room_month (room_id, bill_month),
     INDEX idx_utility_created_at (created_at),
+    UNIQUE KEY idx_ub_payment_token (payment_token),
     FOREIGN KEY (tenant_id) REFERENCES monthly_tenants(id) ON DELETE CASCADE,
     FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
@@ -340,9 +357,12 @@ CREATE TABLE IF NOT EXISTS payment_confirmations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     bill_type ENUM('monthly','daily') NOT NULL,
     bill_id INT NOT NULL,
+    room_number VARCHAR(20) DEFAULT NULL,
     tenant_name VARCHAR(100) NOT NULL,
     amount DECIMAL(10,2) NOT NULL,
     payment_method VARCHAR(50) NOT NULL DEFAULT 'promptpay',
+    transfer_date DATE DEFAULT NULL,
+    transfer_time TIME DEFAULT NULL,
     slip_image VARCHAR(255) DEFAULT NULL,
     status ENUM('pending_verify', 'approved', 'rejected') NOT NULL DEFAULT 'pending_verify',
     admin_note TEXT DEFAULT NULL,
@@ -350,17 +370,35 @@ CREATE TABLE IF NOT EXISTS payment_confirmations (
     verified_at DATETIME DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_pc_status (status),
-    INDEX idx_pc_bill (bill_type, bill_id)
+    INDEX idx_pc_bill (bill_type, bill_id),
+    INDEX idx_pc_created (created_at),
+    INDEX idx_pc_type_status_created (bill_type, status, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Dynamic Column Alterations (Handled in functions.php)
--- ALTER TABLE settings ADD COLUMN promptpay_id VARCHAR(20) DEFAULT NULL;
--- ALTER TABLE settings ADD COLUMN promptpay_name VARCHAR(100) DEFAULT NULL;
--- ALTER TABLE settings ADD COLUMN bank_account_name VARCHAR(100) DEFAULT NULL;
--- ALTER TABLE settings ADD COLUMN bank_account_number VARCHAR(50) DEFAULT NULL;
--- ALTER TABLE settings ADD COLUMN bank_name VARCHAR(100) DEFAULT NULL;
--- ALTER TABLE utility_bills ADD COLUMN payment_token VARCHAR(64) DEFAULT NULL UNIQUE;
--- ALTER TABLE daily_tenants ADD COLUMN payment_token VARCHAR(64) DEFAULT NULL UNIQUE;
+-- Repair Requests Table
+CREATE TABLE IF NOT EXISTS repair_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_number VARCHAR(30) UNIQUE NOT NULL,
+    room_id INT DEFAULT NULL,
+    room_number VARCHAR(20) NOT NULL,
+    reporter_name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20) NOT NULL,
+    email VARCHAR(100) DEFAULT NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    priority ENUM('normal', 'urgent', 'very_urgent') DEFAULT 'normal',
+    status ENUM('pending', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending',
+    image VARCHAR(255) DEFAULT NULL,
+    admin_note TEXT DEFAULT NULL,
+    resolved_at DATETIME DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_repair_status (status),
+    INDEX idx_repair_room (room_number),
+    INDEX idx_repair_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Existing installations are upgraded by the compatibility migrations in functions.php.
 
 -- Insert Default Settings
 INSERT INTO settings (dorm_name, dorm_name_en, address, address_en, water_rate, electric_rate, primary_color)
@@ -370,4 +408,4 @@ VALUES ('หอพักของฉัน', 'My Dormitory', '000 ถนนส�
 -- Password: admin123 (hashed with PASSWORD_DEFAULT)
 -- IMPORTANT: Change this password after first login!
 INSERT INTO users (username, password, email, full_name, role, is_active, account_status)
-VALUES ('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@dormitory.com', 'Administrator', 'admin', 1, 'active');
+VALUES ('admin', '$2y$10$iYG6pR2A6vOs4.DOsVFhzeayEKbST3TRWDoGfc3itU2zH3iMiymfa', 'admin@dormitory.com', 'Administrator', 'admin', 1, 'active');

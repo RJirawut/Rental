@@ -74,7 +74,7 @@ Alwaysdata เป็นบริการ Web Hosting ที่รองรั�
    SetEnv RENTAL_BASE_URL "/"
    SetEnv RENTAL_ALLOW_SETUP "1"
    SetEnv RENTAL_SETUP_TOKEN "mysecrettoken123"
-   SetEnv RENTAL_ADMIN_PASSWORD "admin1234"
+   SetEnv RENTAL_ADMIN_PASSWORD "change-this-password"
    ```
    *(หมายเหตุ: แนะนำให้ทำขั้นตอนนี้บนเซิร์ฟเวอร์เพื่อไม่ให้รบกวนข้อมูลเชื่อมต่อฐานข้อมูล `localhost` เดิมที่คุณใช้พัฒนาในเครื่องคอมพิวเตอร์)*
 
@@ -166,11 +166,18 @@ Alwaysdata รองรับ Git สำเร็จรูป คุณสาม
    - Import ไฟล์ `database/performance_indexes.sql` (เพื่อทำดัชนีเพิ่มความเร็วของฐานข้อมูล)
 
 #### หมายเหตุ: กรณี Import ด้วยมือ คุณต้องตรวจสอบว่ามี User แอดมินในตาราง `users` แล้วหรือยัง
-หากไม่มีแอดมิน ให้ไปที่ phpMyAdmin แท็บ **SQL** แล้วรันคำสั่ง SQL นี้เพื่อสร้างผู้ใช้ Admin หลัก (รหัสผ่านเริ่มต้นจะเป็น `admin1234`):
+ หากไม่มีแอดมิน ให้ไปที่ phpMyAdmin แท็บ **SQL** แล้วรันคำสั่ง SQL นี้เพื่อสร้างผู้ใช้ Admin หลัก (รหัสผ่านจะเป็นค่าที่คุณกำหนดเองตอนสร้างผู้ใช้):
 ```sql
 INSERT INTO users (username, password, email, full_name, role, is_active) VALUES 
 ('admin', '$2y$10$UoWpYskjC4d6yP9PqDkUOu6/7m96TeeUeE.gqL537/r8ZlV6kFm7e', 'admin@dormitory.com', 'Administrator', 'admin', 1);
 ```
+
+> หมายเหตุ: ถ้าคุณ import [`database/schema.sql`](/C:/xampp/htdocs/Rental/database/schema.sql) โดยตรง ผู้ใช้เริ่มต้นจะเป็น `admin` และรหัสผ่านเริ่มต้นคือ `admin123` ตามที่ระบุไว้ในไฟล์นั้น ไม่ใช่รหัสจากตัวอย่างด้านบน
+
+> ถ้าฐานข้อมูลของคุณถูกสร้างก่อนการแก้ไขนี้ แล้วเจอ error `Unknown column 'pin' in 'SET'` ให้รัน SQL นี้ครั้งเดียว:
+> ```sql
+> ALTER TABLE settings ADD COLUMN pin VARCHAR(255) DEFAULT NULL AFTER primary_color;
+> ```
 
 ---
 

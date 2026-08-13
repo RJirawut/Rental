@@ -274,53 +274,14 @@ include __DIR__ . '/../../includes/header.php';
             </tbody>
         </table>
         
-        <!-- Pagination -->
-        <?php if ($totalPages > 1): ?>
-        <div class="d-flex justify-content-between align-items-center mt-3">
-            <div class="text-muted">
-                <?php echo t('showing'); ?> <?php echo (($page - 1) * $itemsPerPage) + 1; ?> - <?php echo min($page * $itemsPerPage, $totalRecords); ?> <?php echo t('of'); ?> <?php echo $totalRecords; ?> <?php echo t('records'); ?>
-            </div>
-            <nav aria-label="Page navigation">
-                <ul class="pagination mb-0">
-                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo $typeFilter ? '&type=' . $typeFilter : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('previous'); ?></a>
-                    </li>
-
-                    <?php
-                    $startPage = max(1, $page - 1);
-                    $endPage = min($totalPages, $page + 1);
-
-                    if ($totalPages > 3) {
-                        if ($page <= 2) {
-                            $startPage = 1;
-                            $endPage = 3;
-                        } elseif ($page >= $totalPages - 1) {
-                            $startPage = $totalPages - 2;
-                            $endPage = $totalPages;
-                        }
-                    }
-
-                    if ($startPage > 1): ?>
-                    <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif;
-
-                    for ($i = $startPage; $i <= $endPage; $i++): ?>
-                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo $typeFilter ? '&type=' . $typeFilter : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo $i; ?></a>
-                    </li>
-                    <?php endfor;
-
-                    if ($endPage < $totalPages): ?>
-                    <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif; ?>
-
-                    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo $typeFilter ? '&type=' . $typeFilter : ''; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>&sort_by=<?php echo $sortBy; ?>&sort_order=<?php echo $sortOrder; ?>"><?php echo t('next'); ?></a>
-                    </li>
-                </ul>
-            </nav>
-        </div>
-        <?php endif; ?>
+        <?php renderUnifiedPagination($page, $totalPages, (int)$totalRecords, $itemsPerPage, [
+            'search' => $search,
+            'type' => $typeFilter,
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
+            'sort_by' => $sortBy,
+            'sort_order' => $sortOrder,
+        ], t('invoices')); ?>
     </div>
     </form>
 </div>

@@ -216,9 +216,9 @@ for ($m = 1; $m <= 12; $m++) {
     
     // Monthly income - paid
     $stmt = $pdo->prepare("
-        SELECT COALESCE(SUM(CASE WHEN ub.paid_amount > 0 THEN ub.paid_amount ELSE ub.total_amount END), 0) as amount 
-        FROM utility_bills ub 
-        WHERE DATE_FORMAT(ub.paid_date, '%Y-%m') = ? 
+        SELECT COALESCE(SUM(ub.total_amount), 0) as amount
+        FROM utility_bills ub
+        WHERE DATE_FORMAT(ub.paid_date, '%Y-%m') = ?
         AND ub.status = 'paid'
     ");
     $stmt->execute([$monthStr]);
@@ -338,8 +338,8 @@ $grandTotalExtra = $yearlyTotalExtra;
 
 // Grand total monthly income (paid - all time)
 $stmt = $pdo->prepare("
-    SELECT COALESCE(SUM(CASE WHEN ub.paid_amount > 0 THEN ub.paid_amount ELSE ub.total_amount END), 0) as amount 
-    FROM utility_bills ub 
+    SELECT COALESCE(SUM(ub.total_amount), 0) as amount
+    FROM utility_bills ub
     WHERE ub.status = 'paid'
 ");
 $stmt->execute();

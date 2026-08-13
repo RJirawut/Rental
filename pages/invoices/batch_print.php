@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../includes/functions.php';
+require_once __DIR__ . '/../../includes/promptpay_qr.php';
 
 requireLogin();
 
@@ -47,11 +48,21 @@ foreach ($invoices as $invoice) {
     }
     $stmt->execute([$invoice['tenant_id']]);
     $tenant = $stmt->fetch();
+
+    $utilityBillNotes = '';
+    if ($invoice['tenant_type'] === 'monthly' && !empty($invoice['invoice_date'])) {
+        $billMonth = date('Y-m', strtotime($invoice['invoice_date']));
+        $stmt = $pdo->prepare("SELECT notes FROM utility_bills WHERE tenant_id = ? AND bill_month = ? ORDER BY id DESC LIMIT 1");
+        $stmt->execute([$invoice['tenant_id'], $billMonth]);
+        $utilityBillRow = $stmt->fetch();
+        $utilityBillNotes = $utilityBillRow ? trim($utilityBillRow['notes'] ?? '') : '';
+    }
     
     $invoiceData[] = [
         'invoice' => $invoice,
         'items' => $items,
-        'tenant' => $tenant
+        'tenant' => $tenant,
+        'utility_bill_notes' => $utilityBillNotes
     ];
 }
 
@@ -80,6 +91,13 @@ $printAllLabel = $lang === 'en'
         .invoice-page:last-child {
             page-break-after: auto;
         }
+        .qr-code-grid { margin-bottom: 0 !important; }
+        .qr-code-grid > [class*="col-"] { display: flex; }
+        .qr-card { background-color: #f8f9fa; border-radius: 12px; padding: 18px 14px; width: 100%; height: auto; min-height: 0; display: flex; flex-direction: column; align-items: center; text-align: center; box-sizing: border-box; }
+        .qr-card > p:first-child { display: flex; align-items: flex-start; justify-content: center; width: 100%; min-height: 20px; margin-bottom: 0 !important; font-size: 14px; font-weight: 600; line-height: 1.35; color: #2d3748; }
+        .qr-image-slot { display: flex; align-items: flex-start; justify-content: center; width: 100%; height: 80px; flex: 0 0 80px; }
+        .qr-image-slot img { width: 80px; height: 80px; background-color: #fff; padding: 8px; border-radius: 8px; box-sizing: border-box; }
+        .qr-card-caption { min-height: 32px; margin-top: 8px !important; color: #718096; font-size: 12px; line-height: 1.4; }
         @media print {
             .no-print { display: none !important; }
             .invoice-page {
@@ -109,7 +127,7 @@ $printAllLabel = $lang === 'en'
     </div>
     
     <?php foreach ($invoiceData as $data): ?>
-    <?php $invoice = $data['invoice']; $items = $data['items']; $tenant = $data['tenant']; ?>
+    <?php $invoice = $data['invoice']; $items = $data['items']; $tenant = $data['tenant']; $utilityBillNotes = $data['utility_bill_notes'] ?? ''; $paymentInstruction = buildPaymentInstructionText($settings, $lang, $invoice['tenant_type'] ?? 'monthly'); ?>
     <div class="invoice-page">
         <div class="container">
             <div class="row mb-4">
@@ -185,6 +203,49 @@ $printAllLabel = $lang === 'en'
                     </tr>
                 </tfoot>
             </table>
+
+            <div class="row align-items-stretch qr-code-grid">
+                <div class="col-4 text-center">
+                    <?php if (!empty($settings['promptpay_id'])): ?>
+                        <?php echo buildPaymentQRBlockHtml($settings, (float) $invoice['grand_total']); ?>
+                    <?php endif; ?>
+                </div>
+                <div class="col-4 text-center">
+                    <?php
+                    $paymentNoticeUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment-notice.php');
+                    $paymentNoticeQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($paymentNoticeUrl);
+                    ?>
+                    <div class="qr-card">
+                        <p>💳 <?php echo $lang === 'en' ? 'Payment Confirmation' : 'แจ้งชำระเงิน'; ?></p>
+                        <div class="qr-image-slot"><img src="<?php echo $paymentNoticeQrUrl; ?>" alt="Payment Confirmation QR"></div>
+                        <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to submit payment slip' : 'สแกนเพื่อแจ้งชำระเงิน'; ?></p>
+                    </div>
+                </div>
+                <div class="col-4 text-center">
+                    <?php
+                    $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
+                    $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
+                    ?>
+                    <div class="qr-card">
+                        <p>🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
+                        <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
+                        <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
+                    </div>
+                </div>
+            </div>
+            <div class="small mt-2">
+                <strong><?php echo t('notes'); ?>:</strong>
+                <ul class="mb-0 ps-3" style="list-style-type: '- ';">
+                    <?php if (!empty($utilityBillNotes)): ?>
+                    <li><?php echo nl2br(htmlspecialchars($utilityBillNotes)); ?></li>
+                    <?php endif; ?>
+                    <li>
+                        <?php echo htmlspecialchars($paymentInstruction, ENT_QUOTES, 'UTF-8'); ?><br>
+                        <?php echo t('invoice_note_text'); ?><br>
+                        <?php echo t('invoice_keep_receipt'); ?>
+                    </li>
+                </ul>
+            </div>
         </div>
     </div>
     <?php endforeach; ?>

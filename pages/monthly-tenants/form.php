@@ -73,8 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $customerTaxId = sanitize($_POST['customer_tax_id'] ?? '');
     $customerAddress = sanitize($_POST['customer_address'] ?? '');
     $customerBranch = sanitize($_POST['customer_branch'] ?? '00000');
-    $contractStart = $_POST['contract_start'] ?? '';
-    $contractEnd = $_POST['contract_end'] ?? '';
+    $contractStart = normalizeDateFilterValue($_POST['contract_start'] ?? '');
+    $contractEnd = normalizeDateFilterValue($_POST['contract_end'] ?? '');
     $monthlyRent = floatval($_POST['monthly_rent'] ?? 0);
     $deposit = floatval($_POST['deposit'] ?? 0);
     $emergencyContact = sanitize($_POST['emergency_contact'] ?? '');
@@ -109,8 +109,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['success' => false, 'error' => $error]);
             exit;
         }
+    } elseif ($monthlyRent <= 0 || $deposit < 0) {
+        $error = t('required_field');
+        if ($isApi) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'error' => $error]);
+            exit;
+        }
     } elseif ($contractEnd <= $contractStart) {
         $error = t('contract_end_after_start');
+        if ($isApi) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'error' => $error]);
+            exit;
+        }
+    } elseif (!isRoomAvailableForPeriod($roomId, $contractStart, $contractEnd, null, $id > 0 ? $id : null)) {
+        $error = $lang === 'en'
+            ? 'The selected room is not available for the chosen period.'
+            : 'ห้องที่เลือกไม่ว่างในช่วงเวลาที่ระบุ';
         if ($isApi) {
             header('Content-Type: application/json');
             echo json_encode(['success' => false, 'error' => $error]);
