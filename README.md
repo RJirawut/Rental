@@ -85,9 +85,6 @@ Rental/
 │   ├── dashboard.php              # หน้าแดชบอร์ด
 │   ├── settings.php               # หน้าตั้งค่า
 │   ├── auth/
-│   │   ├── login.php              # หน้าเข้าสู่ระบบ
-│   │   ├── forgot-password.php    # ลืมรหัสผ่าน
-│   │   ├── reset-password.php     # รีเซ็ตรหัสผ่าน
 │   │   └── logout.php             # ออกจากระบบ
 │   ├── admin/
 │   │   ├── users.php              # จัดการผู้ใช้
@@ -148,3 +145,4 @@ Rental/
 
 พัฒนาด้วย ❤️ สำหรับระบบจัดการหอพัก
 "# Rental" 
+"# TestRental" 
