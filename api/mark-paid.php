@@ -12,6 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 requireApiLogin();
 requireValidCsrfToken();
+ensureRoomTypePriceHistoryTable();
 
 // Get POST data
 $input = json_decode(file_get_contents('php://input'), true);
@@ -46,8 +47,16 @@ try {
         $billId = (int) $bill['id'];
         $amount = $bill['total_amount'];
     } else {
-        // Get tenant info to create bill
-        $stmt = $pdo->prepare("SELECT monthly_rent FROM monthly_tenants WHERE id = ?");
+        // Build a new bill from the rate effective during the requested month.
+        // Previously generated bills are handled above and keep their snapshot.
+        $stmt = $pdo->prepare("
+            SELECT mt.monthly_rent, mt.room_id, r.room_type_id,
+                   rt.price_monthly AS room_type_price_monthly
+            FROM monthly_tenants mt
+            JOIN rooms r ON r.id = mt.room_id
+            JOIN room_types rt ON rt.id = r.room_type_id
+            WHERE mt.id = ?
+        ");
         $stmt->execute([$tenantId]);
         $tenant = $stmt->fetch();
         
@@ -56,19 +65,26 @@ try {
             exit;
         }
         
-        // Create new utility bill with rent only
+        $rentAmount = calculateMonthlyTenantRentForMonth($tenant, $month);
+
+        // Create a paid utility bill with rent only.
         $stmt = $pdo->prepare("
             INSERT INTO utility_bills (
                 tenant_id, room_id, bill_month, bill_date, 
                 rent_amount, water_amount, elec_amount, other_fees, discount, total_amount, 
                 status, paid_date, created_by
-            ) 
-            SELECT mt.id, mt.room_id, ?, CURDATE(), mt.monthly_rent, 0, 0, 0, 0, mt.monthly_rent, 'paid', CURDATE(), ?
-            FROM monthly_tenants mt WHERE mt.id = ?
+            ) VALUES (?, ?, ?, CURDATE(), ?, 0, 0, 0, 0, ?, 'paid', CURDATE(), ?)
         ");
-        $success = $stmt->execute([$month, $_SESSION['user_id'], $tenantId]);
+        $success = $stmt->execute([
+            $tenantId,
+            $tenant['room_id'],
+            $month,
+            $rentAmount,
+            $rentAmount,
+            getValidSessionUserId(),
+        ]);
         $billId = (int) $pdo->lastInsertId();
-        $amount = $tenant['monthly_rent'];
+        $amount = $rentAmount;
     }
     
     if ($success) {

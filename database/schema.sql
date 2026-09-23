@@ -87,6 +87,21 @@ CREATE TABLE room_types (
     INDEX idx_room_types_active_name (is_active, type_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Room Type Price History Table (keeps rates effective by date)
+CREATE TABLE room_type_price_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    room_type_id INT NOT NULL,
+    effective_date DATE NOT NULL,
+    price_daily DECIMAL(10,2) NOT NULL DEFAULT 0,
+    price_monthly DECIMAL(10,2) NOT NULL DEFAULT 0,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_room_type_price_effective (room_type_id, effective_date),
+    INDEX idx_room_type_price_history_lookup (room_type_id, effective_date),
+    FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Rooms Table
 CREATE TABLE rooms (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -355,6 +370,7 @@ CREATE TABLE email_queue (
 -- Payment Confirmations Table
 CREATE TABLE IF NOT EXISTS payment_confirmations (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    tracking_code VARCHAR(40) DEFAULT NULL,
     bill_type ENUM('monthly','daily') NOT NULL,
     bill_id INT NOT NULL,
     room_number VARCHAR(20) DEFAULT NULL,
@@ -369,6 +385,7 @@ CREATE TABLE IF NOT EXISTS payment_confirmations (
     verified_by INT DEFAULT NULL,
     verified_at DATETIME DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_pc_tracking_code (tracking_code),
     INDEX idx_pc_status (status),
     INDEX idx_pc_bill (bill_type, bill_id),
     INDEX idx_pc_created (created_at),

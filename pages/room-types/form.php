@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $description = sanitize($_POST['description'] ?? '');
     $descriptionEn = sanitize($_POST['description_en'] ?? '');
     
-    if (empty($typeName)) {
+    if (empty($typeName) || $priceDaily < 0 || $priceMonthly < 0) {
         $error = t('required_field');
         if ($isApi) {
             header('Content-Type: application/json');
@@ -42,31 +42,97 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } else {
-        if ($id > 0) {
-            $stmt = $pdo->prepare("UPDATE room_types SET type_name = ?, type_name_en = ?, price_daily = ?, price_monthly = ?, description = ?, description_en = ? WHERE id = ?");
-            $stmt->execute([$typeName, $typeNameEn, $priceDaily, $priceMonthly, $description, $descriptionEn, $id]);
-            logActivity('update_room_type', 'room_type', $id);
-            if ($isApi) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => true, 'room_type_id' => $id, 'message' => t('save_success')]);
-                exit;
-            }
-            setFlashMessage('success', t('save_success'));
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO room_types (type_name, type_name_en, price_daily, price_monthly, description, description_en) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$typeName, $typeNameEn, $priceDaily, $priceMonthly, $description, $descriptionEn]);
-            $newId = $pdo->lastInsertId();
-            logActivity('create_room_type', 'room_type', $newId);
-            if ($isApi) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => true, 'room_type_id' => $newId, 'message' => t('save_success')]);
-                exit;
-            }
-            setFlashMessage('success', t('save_success'));
-        }
+        try {
+            ensureRoomTypePriceHistoryTable();
+            $pdo->beginTransaction();
+            $effectiveDate = date('Y-m-d');
+            $updatedMonthlyTenants = 0;
 
-        header('Location: index.php');
-        exit;
+            if ($id > 0) {
+                $stmt = $pdo->prepare("SELECT price_daily, price_monthly FROM room_types WHERE id = ? FOR UPDATE");
+                $stmt->execute([$id]);
+                $currentRoomType = $stmt->fetch();
+                if (!$currentRoomType) {
+                    throw new RuntimeException('Room type not found');
+                }
+
+                $dailyPriceChanged = abs((float) $currentRoomType['price_daily'] - $priceDaily) >= 0.005;
+                $monthlyPriceChanged = abs((float) $currentRoomType['price_monthly'] - $priceMonthly) >= 0.005;
+
+                $stmt = $pdo->prepare("UPDATE room_types SET type_name = ?, type_name_en = ?, price_daily = ?, price_monthly = ?, description = ?, description_en = ? WHERE id = ?");
+                $stmt->execute([$typeName, $typeNameEn, $priceDaily, $priceMonthly, $description, $descriptionEn, $id]);
+
+                if ($monthlyPriceChanged) {
+                    // Keep negotiated rents intact. Only tenants still using the old
+                    // standard room-type rate follow the new standard rate.
+                    $stmt = $pdo->prepare("
+                            UPDATE monthly_tenants mt
+                            INNER JOIN rooms r ON r.id = mt.room_id
+                            SET mt.monthly_rent = ?
+                            WHERE r.room_type_id = ?
+                              AND mt.status IN ('active', 'pending')
+                              AND mt.contract_end >= ?
+                              AND ABS(mt.monthly_rent - ?) < 0.005
+                    ");
+                    $stmt->execute([
+                        $priceMonthly,
+                        $id,
+                        $effectiveDate,
+                        (float) $currentRoomType['price_monthly'],
+                    ]);
+                    $updatedMonthlyTenants = $stmt->rowCount();
+                }
+
+                // Store today's effective rate on every save, not just when PHP detects
+                // a difference. This repairs an empty history table after deployment
+                // when the current price was saved before the new code was available.
+                // Existing bills and invoices keep their own price snapshots.
+                recordRoomTypePriceHistory($id, $priceDaily, $priceMonthly, $effectiveDate);
+
+                logActivity(
+                    'update_room_type',
+                    'room_type',
+                    $id,
+                    "Price effective {$effectiveDate}; updated {$updatedMonthlyTenants} monthly tenant(s)"
+                );
+                $savedId = $id;
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO room_types (type_name, type_name_en, price_daily, price_monthly, description, description_en) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$typeName, $typeNameEn, $priceDaily, $priceMonthly, $description, $descriptionEn]);
+                $savedId = (int) $pdo->lastInsertId();
+                recordRoomTypePriceHistory($savedId, $priceDaily, $priceMonthly, $effectiveDate);
+                logActivity('create_room_type', 'room_type', $savedId);
+            }
+
+            $pdo->commit();
+
+            if ($isApi) {
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'room_type_id' => $savedId,
+                    'effective_date' => $effectiveDate,
+                    'updated_monthly_tenants' => $updatedMonthlyTenants,
+                    'message' => t('save_success'),
+                ]);
+                exit;
+            }
+
+            setFlashMessage('success', t('save_success'));
+            header('Location: index.php');
+            exit;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('Room type save failed: ' . $e->getMessage());
+            $error = t('save_error');
+            if ($isApi) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'error' => $error]);
+                exit;
+            }
+        }
     }
 }
 

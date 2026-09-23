@@ -59,11 +59,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+$settings = getSettings();
+$enableDaily = (int) ($settings['enable_daily'] ?? 1);
+$enableMonthly = (int) ($settings['enable_monthly'] ?? 1);
+
 // Filter inputs
 $statusFilter = trim($_GET['status'] ?? 'all');
-$typeFilter = trim($_GET['type'] ?? 'daily');
-if (!in_array($typeFilter, ['monthly', 'daily'], true)) {
+if ($enableDaily && !$enableMonthly) {
     $typeFilter = 'daily';
+} elseif (!$enableDaily && $enableMonthly) {
+    $typeFilter = 'monthly';
+} else {
+    $typeFilter = trim($_GET['type'] ?? 'daily');
+    if (!in_array($typeFilter, ['monthly', 'daily'], true)) {
+        $typeFilter = 'daily';
+    }
 }
 $search = trim($_GET['search'] ?? '');
 $page = max(1, (int)($_GET['page'] ?? 1));
@@ -443,7 +453,7 @@ function confirmDelete(btnOrId) {
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start">
                         <div>
-                            <div class="repair-stat-label"><?php echo t('grand_total'); ?> (<?php echo t('pending_verify'); ?>)</div>
+                            <div class="repair-stat-label"><?php echo t('grand_total'); ?></div>
                             <div class="repair-stat-value" style="font-size: 1.5rem;"><?php echo formatCurrency($totalPendingAmount); ?> <?php echo t('baht'); ?></div>
                         </div>
                         <div class="repair-stat-icon"><i class="bi bi-cash-stack"></i></div>
@@ -486,6 +496,7 @@ function confirmDelete(btnOrId) {
             box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
         }
     </style>
+    <?php if ($enableDaily && $enableMonthly): ?>
     <div class="mb-4">
         <div class="pc-segmented-tabs">
             <a class="pc-tab-item <?php echo $typeFilter === 'daily' ? 'active' : ''; ?>" href="?type=daily<?php echo $statusFilter !== 'all' ? '&status=' . urlencode($statusFilter) : ''; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>">
@@ -496,6 +507,7 @@ function confirmDelete(btnOrId) {
             </a>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- Search & Filter -->
     <div class="card repair-toolbar-card mb-4">
@@ -544,18 +556,13 @@ function confirmDelete(btnOrId) {
                                 </a>
                             </th>
                             <th class="text-nowrap text-center">
-                                <a href="<?php echo buildSortUrl('bill_type', $sortBy, $sortOrder, $search, $statusFilter, $typeFilter); ?>" style="text-decoration: none; color: inherit;">
-                                    <?php echo t('type'); ?><?php echo getSortIcon('bill_type', $sortBy, $sortOrder); ?>
-                                </a>
-                            </th>
-                            <th class="text-nowrap text-center">
                                 <a href="<?php echo buildSortUrl('amount', $sortBy, $sortOrder, $search, $statusFilter, $typeFilter); ?>" style="text-decoration: none; color: inherit;">
                                     <?php echo t('payment_amount'); ?><?php echo getSortIcon('amount', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
                             <th class="text-nowrap text-center">
-                                <a href="<?php echo buildSortUrl('transfer_date', $sortBy, $sortOrder, $search, $statusFilter, $typeFilter); ?>" style="text-decoration: none; color: inherit;">
-                                    <?php echo t('transfer_datetime'); ?><?php echo getSortIcon('transfer_date', $sortBy, $sortOrder); ?>
+                                <a href="<?php echo buildSortUrl('created_at', $sortBy, $sortOrder, $search, $statusFilter, $typeFilter); ?>" style="text-decoration: none; color: inherit;">
+                                    <?php echo t('transfer_datetime'); ?><?php echo getSortIcon('created_at', $sortBy, $sortOrder); ?>
                                 </a>
                             </th>
                             <th class="text-nowrap text-center"><?php echo t('payment_slip'); ?></th>
@@ -570,7 +577,7 @@ function confirmDelete(btnOrId) {
                     <tbody>
                         <?php if (empty($records)): ?>
                             <tr>
-                                <td colspan="9" class="text-center py-5 text-muted">
+                                <td colspan="8" class="text-center py-5 text-muted">
                                     <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                                     <?php echo t('no_payment_confirmations'); ?>
                                 </td>
@@ -607,29 +614,12 @@ function confirmDelete(btnOrId) {
                                         <span class="fw-bold text-dark"><?php echo htmlspecialchars($row['tenant_name']); ?></span>
                                     </td>
                                     <td class="text-nowrap text-center">
-                                        <?php if ($row['bill_type'] === 'monthly'): ?>
-                                            <span class="badge bg-info text-dark"><i class="bi bi-calendar-month me-1"></i><?php echo t('monthly_tenants'); ?></span>
-                                        <?php else: ?>
-                                            <span class="badge bg-primary"><i class="bi bi-calendar-day me-1"></i><?php echo t('daily_tenants'); ?></span>
-                                        <?php endif; ?>
+                                        <span class="fw-bold text-success"><?php echo formatCurrency($row['amount']); ?> <?php echo t('baht'); ?></span>
                                     </td>
                                     <td class="text-nowrap text-center">
-                                        <?php if ($row['bill_type'] === 'monthly'): ?>
-                                            <?php if ($row['status'] === 'approved'): ?>
-                                                <span class="badge bg-success me-1"><i class="bi bi-check-circle me-1"></i>ชำระเงินครบแล้ว</span>
-                                            <?php elseif ($row['status'] === 'pending_verify'): ?>
-                                                <span class="badge bg-info text-dark me-1"><i class="bi bi-clock-history me-1"></i>รออนุมัติ</span>
-                                            <?php else: ?>
-                                                <span class="badge bg-secondary me-1"><i class="bi bi-x-circle me-1"></i>ปฏิเสธแล้ว</span>
-                                            <?php endif; ?>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td class="text-nowrap text-center">
-                                        <?php if (!empty($row['transfer_date'])): ?>
-                                            <div><i class="bi bi-calendar me-1"></i><?php echo formatDate($row['transfer_date']); ?></div>
-                                            <?php if (!empty($row['transfer_time'])): ?>
-                                                <div class="small text-muted"><i class="bi bi-clock me-1"></i><?php echo htmlspecialchars(substr($row['transfer_time'], 0, 5)); ?></div>
-                                            <?php endif; ?>
+                                        <?php if (!empty($row['created_at'])): ?>
+                                            <div><i class="bi bi-calendar me-1"></i><?php echo formatDate($row['created_at']); ?></div>
+                                            <div class="small text-muted"><i class="bi bi-clock me-1"></i><?php echo date('H:i', strtotime($row['created_at'])); ?></div>
                                         <?php else: ?>
                                             <span class="text-muted">-</span>
                                         <?php endif; ?>

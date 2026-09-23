@@ -665,14 +665,7 @@ include __DIR__ . '/../../includes/header.php';
                                 <i class="bi bi-pencil"></i>
                             </a>
                             <?php if ($tenant['status'] === 'pending_payment'): ?>
-                                <form method="POST" action="" class="d-inline" onsubmit="return confirm('<?php echo $lang === 'en' ? 'Send a new payment link by email?' : 'ส่งลิงก์ชำระเงินใหม่ทางอีเมลหรือไม่'; ?>')">
-                                    <?php echo csrfInput(); ?>
-                                    <input type="hidden" name="action" value="resend_payment_link">
-                                    <input type="hidden" name="id" value="<?php echo $tenant['id']; ?>">
-                                    <button type="submit" class="btn btn-sm btn-dark" title="<?php echo $lang === 'en' ? 'Resend payment link' : 'ส่งลิงก์ชำระเงินใหม่'; ?>">
-                                        <i class="bi bi-send"></i>
-                                    </button>
-                                </form>
+
                                 <form method="POST" action="" class="d-inline" onsubmit="return confirm('<?php echo t('confirm_payment'); ?>')">
                                     <?php echo csrfInput(); ?>
                                     <input type="hidden" name="action" value="payment">

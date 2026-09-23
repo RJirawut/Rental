@@ -209,7 +209,8 @@ function getMonthlyReceiptContext(int $tenantId, string $billMonth, ?int $invoic
         return null;
     }
 
-    $stmt = $pdo->prepare("SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en
+    $stmt = $pdo->prepare("SELECT mt.*, r.room_number, r.room_type_id, rt.type_name, rt.type_name_en,
+        rt.price_monthly AS room_type_price_monthly
         FROM monthly_tenants mt
         JOIN rooms r ON mt.room_id = r.id
         JOIN room_types rt ON r.room_type_id = rt.id
@@ -271,7 +272,9 @@ function getMonthlyReceiptContext(int $tenantId, string $billMonth, ?int $invoic
         $stmt->execute([(int) $invoice['id']]);
         $invoiceItems = $stmt->fetchAll();
     } else {
-        $rentAmount = $bill ? (float) $bill['rent_amount'] : (float) $tenant['monthly_rent'];
+        $rentAmount = $bill
+            ? (float) $bill['rent_amount']
+            : calculateMonthlyTenantRentForMonth($tenant, $billMonth);
         $waterAmount = $bill ? (float) $bill['water_amount'] : 0;
         $elecAmount = $bill ? (float) $bill['elec_amount'] : 0;
         $otherFees = $bill ? (float) $bill['other_fees'] : 0;
@@ -304,7 +307,9 @@ function getMonthlyReceiptContext(int $tenantId, string $billMonth, ?int $invoic
             ];
         }
     } else {
-        $rentAmount = $bill ? (float) $bill['rent_amount'] : (float) $tenant['monthly_rent'];
+        $rentAmount = $bill
+            ? (float) $bill['rent_amount']
+            : calculateMonthlyTenantRentForMonth($tenant, $billMonth);
         $lineItems[] = [
             'description' => t('invoice_room_rent') . ' ' . $typeName . ' (' . t('invoice_room_label') . ' ' . $tenant['room_number'] . ')',
             'qty' => '1 ' . t('invoice_month_unit'),

@@ -59,12 +59,23 @@ if ($tenantId === 0) {
 }
 
 // Get tenant details
-$stmt = $pdo->prepare("SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en FROM monthly_tenants mt JOIN rooms r ON mt.room_id = r.id JOIN room_types rt ON r.room_type_id = rt.id WHERE mt.id = ?");
+$stmt = $pdo->prepare("SELECT mt.*, r.room_number, r.room_type_id, rt.type_name, rt.type_name_en,
+    rt.price_monthly AS room_type_price_monthly
+    FROM monthly_tenants mt
+    JOIN rooms r ON mt.room_id = r.id
+    JOIN room_types rt ON r.room_type_id = rt.id
+    WHERE mt.id = ?");
 $stmt->execute([$tenantId]);
 $tenant = $stmt->fetch();
 
 if (!$tenant && $invoice) {
-    $stmt = $pdo->prepare("SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en FROM monthly_tenants mt JOIN rooms r ON mt.room_id = r.id JOIN room_types rt ON r.room_type_id = rt.id WHERE mt.room_id = ? AND mt.contract_start <= ? AND mt.contract_end >= ? ORDER BY mt.updated_at DESC, mt.id DESC LIMIT 1");
+    $stmt = $pdo->prepare("SELECT mt.*, r.room_number, r.room_type_id, rt.type_name, rt.type_name_en,
+        rt.price_monthly AS room_type_price_monthly
+        FROM monthly_tenants mt
+        JOIN rooms r ON mt.room_id = r.id
+        JOIN room_types rt ON r.room_type_id = rt.id
+        WHERE mt.room_id = ? AND mt.contract_start <= ? AND mt.contract_end >= ?
+        ORDER BY mt.updated_at DESC, mt.id DESC LIMIT 1");
     $stmt->execute([$invoice['room_id'], $billingMonthStart, $billingMonthStart]);
     $tenant = $stmt->fetch();
 
@@ -119,7 +130,8 @@ $stmt->execute([$tenantId, $billingMonth]);
 $bill = $stmt->fetch();
 
 // Calculate totals from bill details (bill total_amount includes discount, so we recalculate)
-$rentAmount = $bill ? $bill['rent_amount'] : $tenant['monthly_rent'];
+$calculatedMonthlyRent = calculateMonthlyTenantRentForMonth($tenant, $billingMonth);
+$rentAmount = $bill ? $bill['rent_amount'] : $calculatedMonthlyRent;
 $waterAmount = $bill ? $bill['water_amount'] : 0;
 $elecAmount = $bill ? $bill['elec_amount'] : 0;
 $otherFees = $bill ? $bill['other_fees'] : 0;
@@ -296,8 +308,8 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, 'monthly');
                 <tr>
                     <td><?php echo t('invoice_room_rent'); ?> <?php echo $typeName; ?> (<?php echo t('invoice_room_label'); ?> <?php echo $tenant['room_number']; ?>)</td>
                     <td class="text-center">1 <?php echo t('invoice_month_unit'); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($bill ? $bill['rent_amount'] : $tenant['monthly_rent']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($bill ? $bill['rent_amount'] : $tenant['monthly_rent']); ?></td>
+                    <td class="text-end"><?php echo formatCurrency($rentAmount); ?></td>
+                    <td class="text-end"><?php echo formatCurrency($rentAmount); ?></td>
                 </tr>
                 <?php if ($bill && $bill['water_amount'] > 0): ?>
                 <tr>
@@ -362,13 +374,31 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, 'monthly');
         </table>
 
         <!-- QR Codes Section -->
+        <?php
+        $invoiceForCheck = $invoice ?: ['tenant_type' => 'monthly', 'tenant_id' => $tenantId, 'invoice_date' => $billingMonthStart, 'status' => null];
+        $isInvoicePaid = checkInvoicePaid($pdo, $invoiceForCheck);
+        if (!$isInvoicePaid && $bill && ($bill['status'] ?? '') === 'paid') {
+            $isInvoicePaid = true;
+        }
+        ?>
+        <?php if ($isInvoicePaid): ?>
+        <div class="row align-items-stretch mb-4 qr-code-grid justify-content-center">
+            <div class="col-6 col-md-4 text-center">
+                <?php
+                $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
+                $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
+                ?>
+                <div class="qr-card">
+                    <p style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px;">🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
+                    <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
+                    <p style="color: #718096; font-size: 12px; margin-top: 8px; margin-bottom: 0;"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
+                </div>
+            </div>
+        </div>
+        <?php elseif (!empty($settings['promptpay_id'])): ?>
         <div class="row align-items-stretch mb-4 qr-code-grid">
             <div class="col-4 text-center">
-                <?php if (!empty($settings['promptpay_id']) && $bill): ?>
-                    <?php
-                    echo buildPaymentQRBlockHtml($settings, $finalTotal);
-                    ?>
-                <?php endif; ?>
+                <?php echo buildPaymentQRBlockHtml($settings, $finalTotal); ?>
             </div>
             <div class="col-4 text-center">
                 <?php
@@ -393,6 +423,32 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, 'monthly');
                 </div>
             </div>
         </div>
+        <?php else: ?>
+        <div class="row align-items-stretch mb-4 qr-code-grid justify-content-center">
+            <div class="col-6 col-md-4 text-center">
+                <?php
+                $paymentNoticeUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment-notice.php');
+                $paymentNoticeQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($paymentNoticeUrl);
+                ?>
+                <div class="qr-card">
+                    <p style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px;">💳 <?php echo $lang === 'en' ? 'Payment Confirmation' : 'แจ้งชำระเงิน'; ?></p>
+                    <div class="qr-image-slot"><img src="<?php echo $paymentNoticeQrUrl; ?>" alt="Payment Confirmation QR"></div>
+                    <p style="color: #718096; font-size: 12px; margin-top: 8px; margin-bottom: 0;"><?php echo $lang === 'en' ? 'Scan to submit payment slip' : 'สแกนเพื่อแจ้งชำระเงิน'; ?></p>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 text-center">
+                <?php
+                $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
+                $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
+                ?>
+                <div class="qr-card">
+                    <p style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px;">🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
+                    <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
+                    <p style="color: #718096; font-size: 12px; margin-top: 8px; margin-bottom: 0;"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <?php $utilityBillNotes = $bill ? trim($bill['notes'] ?? '') : ''; ?>
         <div class="small">

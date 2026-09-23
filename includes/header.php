@@ -5,6 +5,14 @@ require_once __DIR__ . '/../includes/functions.php';
 // Require login
 requireLogin();
 
+// Keep upgraded installations ready for dated room pricing. The sync only
+// creates missing baseline rows; existing price history is never replaced.
+try {
+    ensureRoomTypePriceHistoryTable();
+} catch (Throwable $e) {
+    error_log('Room type price history bootstrap failed: ' . $e->getMessage());
+}
+
 // Clear other pages' PIN verification flags
 $scriptPath = $_SERVER['SCRIPT_NAME'] ?? '';
 $currentPageSessionKey = 'pin_verified_' . md5($scriptPath);

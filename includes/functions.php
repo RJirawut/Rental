@@ -343,6 +343,194 @@ function getStorageUsage() {
     ];
 }
 
+/**
+ * Keep a dated record of room-type prices.  Bills keep their own price
+ * snapshot; this table is used only when a new booking or bill is created
+ * for a given date.
+ */
+function ensureRoomTypePriceHistoryTable(): void {
+    global $pdo;
+
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS room_type_price_history (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            room_type_id INT NOT NULL,
+            effective_date DATE NOT NULL,
+            price_daily DECIMAL(10,2) NOT NULL DEFAULT 0,
+            price_monthly DECIMAL(10,2) NOT NULL DEFAULT 0,
+            created_by INT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_room_type_price_effective (room_type_id, effective_date),
+            INDEX idx_room_type_price_history_lookup (room_type_id, effective_date),
+            CONSTRAINT fk_room_type_price_history_type
+                FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE,
+            CONSTRAINT fk_room_type_price_history_user
+                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    // Existing installations may have no price history. Their current rate
+    // starts today so an upgrade never creates a new price record for dates
+    // before the feature was enabled. Existing bills remain unchanged.
+    $pdo->exec("
+        INSERT INTO room_type_price_history
+            (room_type_id, effective_date, price_daily, price_monthly)
+        SELECT rt.id, CURDATE(), rt.price_daily, rt.price_monthly
+        FROM room_types rt
+        LEFT JOIN room_type_price_history ph ON ph.room_type_id = rt.id
+        WHERE ph.room_type_id IS NULL
+    ");
+
+    $checked = true;
+}
+
+function recordRoomTypePriceHistory(
+    int $roomTypeId,
+    float $dailyPrice,
+    float $monthlyPrice,
+    string $effectiveDate
+): void {
+    global $pdo;
+
+    if ($roomTypeId <= 0 || normalizeDateFilterValue($effectiveDate) === '') {
+        throw new InvalidArgumentException('Invalid room type price history data');
+    }
+
+    ensureRoomTypePriceHistoryTable();
+
+    $stmt = $pdo->prepare("
+        INSERT INTO room_type_price_history
+            (room_type_id, effective_date, price_daily, price_monthly, created_by)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            price_daily = VALUES(price_daily),
+            price_monthly = VALUES(price_monthly),
+            created_by = VALUES(created_by),
+            created_at = CURRENT_TIMESTAMP
+    ");
+    $stmt->execute([
+        $roomTypeId,
+        $effectiveDate,
+        round(max(0, $dailyPrice), 2),
+        round(max(0, $monthlyPrice), 2),
+        getValidSessionUserId(),
+    ]);
+}
+
+function getRoomTypePriceForDate(int $roomTypeId, string $date): array {
+    global $pdo;
+
+    $date = normalizeDateFilterValue($date);
+    if ($roomTypeId <= 0 || $date === '') {
+        return ['price_daily' => 0.0, 'price_monthly' => 0.0];
+    }
+
+    ensureRoomTypePriceHistoryTable();
+
+    $stmt = $pdo->prepare("
+        SELECT price_daily, price_monthly
+        FROM room_type_price_history
+        WHERE room_type_id = ? AND effective_date <= ?
+        ORDER BY effective_date DESC, id DESC
+        LIMIT 1
+    ");
+    $stmt->execute([$roomTypeId, $date]);
+    $price = $stmt->fetch();
+
+    if (!$price) {
+        $stmt = $pdo->prepare("SELECT price_daily, price_monthly FROM room_types WHERE id = ? LIMIT 1");
+        $stmt->execute([$roomTypeId]);
+        $price = $stmt->fetch();
+    }
+
+    return [
+        'price_daily' => (float) ($price['price_daily'] ?? 0),
+        'price_monthly' => (float) ($price['price_monthly'] ?? 0),
+    ];
+}
+
+/**
+ * Calculate a month using every price that was effective inside that month.
+ * A change on the 14th applies from the 14th inclusive; prior days retain
+ * the earlier rate.  The result is rounded only after all daily portions are
+ * combined, preventing cumulative rounding drift.
+ */
+function calculateRoomTypeMonthlyRentForMonth(int $roomTypeId, string $billMonth): float {
+    global $pdo;
+
+    $billMonth = normalizeMonthFilterValue($billMonth, '');
+    if ($roomTypeId <= 0 || $billMonth === '') {
+        return 0.0;
+    }
+
+    ensureRoomTypePriceHistoryTable();
+
+    $monthStart = $billMonth . '-01';
+    $monthEnd = date('Y-m-t', strtotime($monthStart));
+    $daysInMonth = (int) date('t', strtotime($monthStart));
+    $currentDate = $monthStart;
+    $currentRate = getRoomTypePriceForDate($roomTypeId, $monthStart)['price_monthly'];
+    $total = 0.0;
+
+    $stmt = $pdo->prepare("
+        SELECT effective_date, price_monthly
+        FROM room_type_price_history
+        WHERE room_type_id = ?
+          AND effective_date > ?
+          AND effective_date <= ?
+        ORDER BY effective_date ASC, id ASC
+    ");
+    $stmt->execute([$roomTypeId, $monthStart, $monthEnd]);
+
+    foreach ($stmt->fetchAll() as $change) {
+        $changedOn = $change['effective_date'];
+        $daysAtCurrentRate = (int) ((strtotime($changedOn) - strtotime($currentDate)) / 86400);
+        if ($daysAtCurrentRate > 0) {
+            $total += $currentRate * ($daysAtCurrentRate / $daysInMonth);
+        }
+        $currentDate = $changedOn;
+        $currentRate = (float) $change['price_monthly'];
+    }
+
+    $remainingDays = (int) ((strtotime($monthEnd . ' +1 day') - strtotime($currentDate)) / 86400);
+    if ($remainingDays > 0) {
+        $total += $currentRate * ($remainingDays / $daysInMonth);
+    }
+
+    return round($total, 2);
+}
+
+/**
+ * A tenant can have a negotiated rate.  Only tenants whose stored rent still
+ * matches the room type's current rate follow room-type price history.
+ */
+function calculateMonthlyTenantRentForMonth(array $tenant, string $billMonth): float {
+    $tenantRent = (float) ($tenant['monthly_rent'] ?? 0);
+    $roomTypeId = (int) ($tenant['room_type_id'] ?? 0);
+    $roomTypeCurrentRent = isset($tenant['room_type_price_monthly'])
+        ? (float) $tenant['room_type_price_monthly']
+        : null;
+
+    if ($roomTypeId <= 0) {
+        return round($tenantRent, 2);
+    }
+
+    if ($roomTypeCurrentRent === null) {
+        $roomTypeCurrentRent = getRoomTypePriceForDate($roomTypeId, date('Y-m-d'))['price_monthly'];
+    }
+
+    if (abs($tenantRent - $roomTypeCurrentRent) >= 0.005) {
+        return round($tenantRent, 2);
+    }
+
+    return calculateRoomTypeMonthlyRentForMonth($roomTypeId, $billMonth);
+}
+
 // Generate invoice number
 function generateInvoiceNumber($type) {
     global $pdo;
@@ -890,10 +1078,122 @@ function logActivity($action, $entityType = null, $entityId = null, $description
 // Get settings
 function getSettings() {
     global $pdo;
+    ensureSettingsTable();
     ensureRentalTypeColumns();
     ensureSettingsPinColumn();
     $stmt = $pdo->query("SELECT * FROM settings LIMIT 1");
     return $stmt->fetch();
+}
+
+/**
+ * Bootstrap the settings table for databases created before the schema was
+ * imported, or for deployments where only part of the database was restored.
+ * The remaining compatibility migrations can safely add newer columns after
+ * this table exists.
+ */
+function ensureSettingsTable() {
+    global $pdo;
+
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    $createSQL = "CREATE TABLE IF NOT EXISTS settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        dorm_name VARCHAR(100) NOT NULL DEFAULT 'My Dormitory',
+        dorm_name_en VARCHAR(100) DEFAULT 'My Dormitory',
+        company_name VARCHAR(200),
+        address TEXT,
+        address_en TEXT,
+        tax_id VARCHAR(20),
+        branch_number VARCHAR(5) DEFAULT '00000',
+        logo VARCHAR(255),
+        phone VARCHAR(20),
+        email VARCHAR(100),
+        water_rate DECIMAL(10,2) DEFAULT 25.00,
+        electric_rate DECIMAL(10,2) DEFAULT 8.00,
+        vat_rate DECIMAL(5,2) DEFAULT 7.00,
+        payment_due_day INT DEFAULT 5,
+        primary_color VARCHAR(7) DEFAULT '#0d6efd',
+        enable_daily TINYINT(1) DEFAULT 1,
+        enable_monthly TINYINT(1) DEFAULT 1,
+        daily_payment_deadline_hours INT NOT NULL DEFAULT 24,
+        pin VARCHAR(255) DEFAULT NULL,
+        smtp_host VARCHAR(255) DEFAULT NULL,
+        smtp_port INT DEFAULT 587,
+        smtp_username VARCHAR(255) DEFAULT NULL,
+        smtp_password VARCHAR(255) DEFAULT NULL,
+        smtp_encryption VARCHAR(10) DEFAULT 'tls',
+        smtp_from_email VARCHAR(255) DEFAULT NULL,
+        smtp_from_name VARCHAR(255) DEFAULT NULL,
+        email_enabled TINYINT(1) DEFAULT 1,
+        promptpay_id VARCHAR(20) DEFAULT NULL,
+        promptpay_name VARCHAR(100) DEFAULT NULL,
+        bank_account_name VARCHAR(100) DEFAULT NULL,
+        bank_account_number VARCHAR(30) DEFAULT NULL,
+        bank_name VARCHAR(100) DEFAULT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+
+    // --- Attempt to create / recover the table ---
+    // Error 1932: metadata (.frm) exists but InnoDB data file is gone/corrupt.
+    // Error 1813: orphaned tablespace (.ibd) blocks CREATE after a prior DROP.
+    try {
+        $pdo->exec($createSQL);
+    } catch (PDOException $e) {
+        $msg = $e->getMessage();
+        if (strpos($msg, '1932') !== false || strpos($msg, '1813') !== false) {
+            _repairSettingsTablespace($pdo, $createSQL);
+        } else {
+            throw $e;
+        }
+    }
+
+    // Verify the table is actually usable.
+    try {
+        $stmt = $pdo->query("SELECT COUNT(*) FROM settings");
+        $count = (int) $stmt->fetchColumn();
+    } catch (PDOException $e) {
+        $msg = $e->getMessage();
+        if (strpos($msg, '1932') !== false || strpos($msg, '1813') !== false) {
+            _repairSettingsTablespace($pdo, $createSQL);
+            $count = 0;
+        } else {
+            throw $e;
+        }
+    }
+
+    if ($count === 0) {
+        $pdo->exec("INSERT INTO settings
+            (dorm_name, dorm_name_en, water_rate, electric_rate, primary_color)
+            VALUES ('หอพักของฉัน', 'My Dormitory', 5.00, 8.00, '#0d6efd')");
+    }
+
+    $checked = true;
+}
+
+/**
+ * Remove a broken / orphaned InnoDB tablespace for `settings` and re-create
+ * the table.  Handles the combination of errors 1932 and 1813 that occur when
+ * the .frm and .ibd files get out of sync.
+ */
+function _repairSettingsTablespace(PDO $pdo, string $createSQL): void {
+    // 1. Drop the metadata reference (may already be gone).
+    try { $pdo->exec("DROP TABLE IF EXISTS settings"); } catch (PDOException $ignored) {}
+
+    // 2. Locate and remove the orphaned .ibd file so CREATE TABLE can succeed.
+    $datadir = $pdo->query("SELECT @@datadir")->fetchColumn();
+    $dbName  = $pdo->query("SELECT DATABASE()")->fetchColumn();
+    $ibdFile = rtrim(str_replace('\\', '/', $datadir), '/') . '/' . $dbName . '/settings.ibd';
+
+    if (file_exists($ibdFile)) {
+        @unlink($ibdFile);
+    }
+
+    // 3. Also try the non-IF-NOT-EXISTS variant in case the metadata was fully
+    //    cleaned but the previous CREATE silently skipped.
+    $pdo->exec(str_replace('IF NOT EXISTS ', '', $createSQL));
 }
 
 function ensureRentalTypeColumns() {
@@ -2221,6 +2521,7 @@ function ensurePaymentConfirmationsTable() {
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS payment_confirmations (
             id INT AUTO_INCREMENT PRIMARY KEY,
+            tracking_code VARCHAR(40) DEFAULT NULL,
             bill_type ENUM('monthly','daily') NOT NULL,
             bill_id INT NOT NULL,
             room_number VARCHAR(20) DEFAULT NULL,
@@ -2235,6 +2536,7 @@ function ensurePaymentConfirmationsTable() {
             verified_by INT DEFAULT NULL,
             verified_at DATETIME DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_pc_tracking_code (tracking_code),
             INDEX idx_pc_status (status),
             INDEX idx_pc_bill (bill_type, bill_id),
             INDEX idx_pc_created (created_at)
@@ -2242,6 +2544,7 @@ function ensurePaymentConfirmationsTable() {
     ");
 
     $columnsToCheck = [
+        'tracking_code' => "ALTER TABLE payment_confirmations ADD COLUMN tracking_code VARCHAR(40) DEFAULT NULL AFTER id",
         'room_number' => "ALTER TABLE payment_confirmations ADD COLUMN room_number VARCHAR(20) DEFAULT NULL AFTER bill_id",
         'transfer_date' => "ALTER TABLE payment_confirmations ADD COLUMN transfer_date DATE DEFAULT NULL AFTER payment_method",
         'transfer_time' => "ALTER TABLE payment_confirmations ADD COLUMN transfer_time TIME DEFAULT NULL AFTER transfer_date",
@@ -2257,6 +2560,24 @@ function ensurePaymentConfirmationsTable() {
     }
 
     try {
+        $stmt = $pdo->query("SHOW INDEX FROM payment_confirmations WHERE Key_name = 'uq_pc_tracking_code'");
+        if (!$stmt->fetch()) {
+            $pdo->exec("ALTER TABLE payment_confirmations ADD UNIQUE INDEX uq_pc_tracking_code (tracking_code)");
+        }
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), 'Duplicate key name') === false) {
+            error_log('Payment confirmation tracking code index failed: ' . $e->getMessage());
+        }
+    }
+
+    // Give older records a stable code so existing notices can be tracked too.
+    $stmtMissingTrackingCodes = $pdo->query("SELECT id FROM payment_confirmations WHERE tracking_code IS NULL ORDER BY id ASC");
+    $stmtSetTrackingCode = $pdo->prepare("UPDATE payment_confirmations SET tracking_code = ? WHERE id = ? AND tracking_code IS NULL");
+    foreach ($stmtMissingTrackingCodes->fetchAll(PDO::FETCH_COLUMN) as $paymentConfirmationId) {
+        $stmtSetTrackingCode->execute(['PAY-LEGACY-' . (int) $paymentConfirmationId, (int) $paymentConfirmationId]);
+    }
+
+    try {
         $stmt = $pdo->query("SHOW INDEX FROM payment_confirmations WHERE Key_name = 'idx_pc_created'");
         if (!$stmt->fetch()) {
             $pdo->exec("ALTER TABLE payment_confirmations ADD INDEX idx_pc_created (created_at)");
@@ -2268,6 +2589,32 @@ function ensurePaymentConfirmationsTable() {
     }
 
     $checked = true;
+}
+
+function generatePaymentTrackingCode(): string
+{
+    return 'PAY-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(6)));
+}
+
+/**
+ * Return only rooms that currently have a positive outstanding bill and do
+ * not already have a payment confirmation waiting for verification.
+ */
+function getPaymentNoticeRooms(string $billType): array
+{
+    global $pdo;
+
+    ensurePaymentConfirmationsTable();
+
+    if ($billType === 'monthly') {
+        $stmt = $pdo->query("\n            SELECT DISTINCT r.room_number\n            FROM utility_bills ub\n            INNER JOIN rooms r ON r.id = ub.room_id\n            WHERE ub.status IN ('unpaid', 'overdue')\n              AND ub.total_amount > 0\n              AND NOT EXISTS (\n                  SELECT 1\n                  FROM payment_confirmations pc\n                  WHERE pc.bill_type = 'monthly'\n                    AND pc.bill_id = ub.id\n                    AND pc.status = 'pending_verify'\n              )\n            ORDER BY r.room_number ASC\n        ");
+    } elseif ($billType === 'daily') {
+        $stmt = $pdo->query("\n            SELECT DISTINCT r.room_number\n            FROM daily_tenants dt\n            INNER JOIN rooms r ON r.id = dt.room_id\n            LEFT JOIN invoices latest_invoice ON latest_invoice.id = (\n                SELECT i.id\n                FROM invoices i\n                WHERE i.tenant_type = 'daily' AND i.tenant_id = dt.id\n                ORDER BY i.id DESC\n                LIMIT 1\n            )\n            WHERE dt.status = 'pending_payment'\n              AND (dt.payment_deadline IS NULL OR dt.payment_deadline >= NOW())\n              AND COALESCE(latest_invoice.grand_total, dt.total_amount) > 0\n              AND NOT EXISTS (\n                  SELECT 1\n                  FROM payment_confirmations pc\n                  WHERE pc.bill_type = 'daily'\n                    AND pc.bill_id = dt.id\n                    AND pc.status = 'pending_verify'\n              )\n            ORDER BY r.room_number ASC\n        ");
+    } else {
+        return [];
+    }
+
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
 }
 
 function ensurePaymentTokenColumn() {
@@ -2394,12 +2741,14 @@ function getPayableBillForConfirmation(string $billType, int $billId): ?array
 {
     global $pdo;
 
+    ensurePaymentConfirmationsTable();
+
     if ($billId <= 0) {
         return null;
     }
 
     if ($billType === 'monthly') {
-        $stmt = $pdo->prepare("\n            SELECT ub.id, r.room_number, mt.tenant_name, ub.total_amount AS amount_due\n            FROM utility_bills ub\n            INNER JOIN monthly_tenants mt ON mt.id = ub.tenant_id\n            INNER JOIN rooms r ON r.id = ub.room_id\n            WHERE ub.id = ?\n              AND ub.status IN ('unpaid', 'overdue')\n        ");
+        $stmt = $pdo->prepare("\n            SELECT ub.id, r.room_number, mt.tenant_name, ub.total_amount AS amount_due\n            FROM utility_bills ub\n            INNER JOIN monthly_tenants mt ON mt.id = ub.tenant_id\n            INNER JOIN rooms r ON r.id = ub.room_id\n            WHERE ub.id = ?\n              AND ub.status IN ('unpaid', 'overdue')\n              AND ub.total_amount > 0\n              AND NOT EXISTS (\n                  SELECT 1\n                  FROM payment_confirmations pc\n                  WHERE pc.bill_type = 'monthly'\n                    AND pc.bill_id = ub.id\n                    AND pc.status = 'pending_verify'\n              )\n        ");
         $stmt->execute([$billId]);
         $bill = $stmt->fetch();
 
@@ -2407,7 +2756,7 @@ function getPayableBillForConfirmation(string $billType, int $billId): ?array
     }
 
     if ($billType === 'daily') {
-        $stmt = $pdo->prepare("\n            SELECT dt.id, r.room_number, dt.guest_name AS tenant_name,\n                   COALESCE(latest_invoice.grand_total, dt.total_amount) AS amount_due\n            FROM daily_tenants dt\n            INNER JOIN rooms r ON r.id = dt.room_id\n            LEFT JOIN invoices latest_invoice ON latest_invoice.id = (\n                SELECT i.id\n                FROM invoices i\n                WHERE i.tenant_type = 'daily' AND i.tenant_id = dt.id\n                ORDER BY i.id DESC\n                LIMIT 1\n            )\n            WHERE dt.id = ? AND dt.status = 'pending_payment'\n        ");
+        $stmt = $pdo->prepare("\n            SELECT dt.id, r.room_number, dt.guest_name AS tenant_name,\n                   COALESCE(latest_invoice.grand_total, dt.total_amount) AS amount_due\n            FROM daily_tenants dt\n            INNER JOIN rooms r ON r.id = dt.room_id\n            LEFT JOIN invoices latest_invoice ON latest_invoice.id = (\n                SELECT i.id\n                FROM invoices i\n                WHERE i.tenant_type = 'daily' AND i.tenant_id = dt.id\n                ORDER BY i.id DESC\n                LIMIT 1\n            )\n            WHERE dt.id = ?\n              AND dt.status = 'pending_payment'\n              AND (dt.payment_deadline IS NULL OR dt.payment_deadline >= NOW())\n              AND COALESCE(latest_invoice.grand_total, dt.total_amount) > 0\n              AND NOT EXISTS (\n                  SELECT 1\n                  FROM payment_confirmations pc\n                  WHERE pc.bill_type = 'daily'\n                    AND pc.bill_id = dt.id\n                    AND pc.status = 'pending_verify'\n              )\n        ");
         $stmt->execute([$billId]);
         $bill = $stmt->fetch();
 
@@ -2786,7 +3135,7 @@ function approvePaymentConfirmation($id, $adminUserId = null, $note = '') {
             ");
             $stmtUpdateBill->execute([$item['bill_id']]);
         } elseif ($item['bill_type'] === 'daily') {
-            $stmtDaily = $pdo->prepare("SELECT * FROM daily_tenants WHERE id = ? FOR UPDATE");
+            $stmtDaily = $pdo->prepare("SELECT dt.*,\n                COALESCE((\n                    SELECT i.grand_total\n                    FROM invoices i\n                    WHERE i.tenant_type = 'daily' AND i.tenant_id = dt.id\n                    ORDER BY i.id DESC\n                    LIMIT 1\n                ), dt.total_amount) AS payable_amount\n                FROM daily_tenants dt\n                WHERE dt.id = ?\n                FOR UPDATE");
             $stmtDaily->execute([$item['bill_id']]);
             $daily = $stmtDaily->fetch();
 
@@ -2794,7 +3143,7 @@ function approvePaymentConfirmation($id, $adminUserId = null, $note = '') {
                 throw new RuntimeException('This daily booking is no longer awaiting payment');
             }
 
-            $expectedAmount = (float) $daily['total_amount'];
+            $expectedAmount = (float) $daily['payable_amount'];
             if (abs($slipAmount - $expectedAmount) > 0.01) {
                 throw new RuntimeException('The payment amount does not match the booking total');
             }
@@ -2861,4 +3210,44 @@ function rejectPaymentConfirmation($id, $adminUserId = null, $note = '') {
         error_log('Payment rejection failed: ' . $e->getMessage());
         return ['success' => false, 'message' => 'Unable to reject payment confirmation'];
     }
+}
+
+/**
+ * Check if an invoice or its associated bill/booking is fully paid.
+ */
+function checkInvoicePaid(PDO $pdo, array $invoice, ?array $tenant = null): bool {
+    if (!empty($invoice['status']) && $invoice['status'] === 'paid') {
+        return true;
+    }
+
+    $type = $invoice['tenant_type'] ?? $invoice['invoice_type'] ?? '';
+
+    if ($type === 'daily') {
+        $dtStatus = array_key_exists('status', $tenant ?? []) ? $tenant['status'] : false;
+
+        if ($dtStatus === false && !empty($invoice['tenant_id'])) {
+            $stmt = $pdo->prepare("SELECT status FROM daily_tenants WHERE id = ? LIMIT 1");
+            $stmt->execute([$invoice['tenant_id']]);
+            $row = $stmt->fetch();
+            $dtStatus = $row ? $row['status'] : false;
+        }
+
+        if ($dtStatus !== false) {
+            return $dtStatus === null || ($dtStatus !== 'pending_payment' && $dtStatus !== 'cancelled');
+        }
+    }
+
+    if ($type === 'monthly' && !empty($invoice['tenant_id'])) {
+        $billMonth = !empty($invoice['invoice_date']) ? date('Y-m', strtotime($invoice['invoice_date'])) : null;
+        if ($billMonth) {
+            $stmt = $pdo->prepare("SELECT status FROM utility_bills WHERE tenant_id = ? AND bill_month = ? ORDER BY id DESC LIMIT 1");
+            $stmt->execute([$invoice['tenant_id'], $billMonth]);
+            $row = $stmt->fetch();
+            if ($row && ($row['status'] ?? '') === 'paid') {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }

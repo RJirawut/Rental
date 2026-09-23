@@ -8,6 +8,7 @@ $pageTitle = isset($_GET['id']) ? t('edit_guest') : t('add_guest');
 ensureDailyTenantOtherFeesColumn();
 ensureDailyTenantPaymentDeadlineColumn();
 ensureDailyTenantPendingPaymentStatus();
+ensureRoomTypePriceHistoryTable();
 
 $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 $tenant = null;
@@ -73,11 +74,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $diff = $checkInDate->diff($checkOutDate);
         $totalDays = max(1, $diff->days);
         
-        // Get room price
-        $stmt = $pdo->prepare("SELECT rt.price_daily FROM rooms r JOIN room_types rt ON r.room_type_id = rt.id WHERE r.id = ?");
+        // Calculate from the rate effective on the check-in date.  The value
+        // saved here remains the booking and invoice snapshot afterwards.
+        $stmt = $pdo->prepare("SELECT room_type_id FROM rooms WHERE id = ?");
         $stmt->execute([$roomId]);
         $roomData = $stmt->fetch();
-        $dailyRate = $roomData['price_daily'];
+        if (!$roomData) {
+            $error = t('not_found');
+        } else {
+        $dailyRate = $id > 0 && (int) ($tenant['room_id'] ?? 0) === $roomId
+            ? (float) $tenant['daily_rate']
+            : getRoomTypePriceForDate((int) $roomData['room_type_id'], $checkIn)['price_daily'];
         $roomAmount = $dailyRate * $totalDays;
         $totalAmount = $roomAmount + $otherFees;
         
@@ -163,6 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             setFlashMessage('success', t('add_guest_success'));
+        }
         }
 
         if (empty($error)) {

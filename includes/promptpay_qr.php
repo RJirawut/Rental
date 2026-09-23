@@ -67,7 +67,7 @@ function buildPaymentQRBlockHtml($settings, $amount) {
     if (empty($settings['promptpay_id'])) {
         return '';
     }
-    
+
     $lang = $_SESSION['lang'] ?? 'th';
     $isEnglish = $lang === 'en';
     $amount = (float) $amount;
@@ -76,13 +76,12 @@ function buildPaymentQRBlockHtml($settings, $amount) {
     $qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($payload);
 
     $html = '<div class="qr-card qr-card-promptpay">';
-    $html .= '<p class="qr-card-title">'
+    $html .= '<p class="qr-card-title" style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px;">💳 '
         . ($isEnglish ? 'Payment' : 'ชำระเงิน') . '</p>';
-    $html .= '<div class="qr-image-slot"><img src="' . $qrUrl . '" alt="QR Code"></div>';
-
-    $html .= '<p class="qr-card-caption">' . ($isEnglish ? 'Scan to Pay' : 'สแกนเพื่อชำระเงิน') . '</p>';
+    $html .= '<div class="qr-image-slot"><img src="' . $qrUrl . '" alt="Payment QR"></div>';
+    $html .= '<p style="color: #718096; font-size: 12px; margin-top: 8px; margin-bottom: 0;">' . ($isEnglish ? 'Scan to Pay' : 'สแกนเพื่อชำระเงิน') . '</p>';
     $html .= '</div>';
-    
+
     return $html;
 }
 

@@ -92,7 +92,9 @@ function getSortIcon($column, $currentSortBy, $currentSortOrder) {
 
 // Build query - show only tenants whose contracts cover the selected month.
 // Latest bill/invoice rows are derived once, avoiding repeated correlated subqueries per tenant.
-$sql = "SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en, rt.price_monthly,
+$sql = "SELECT mt.*, r.room_number, r.room_type_id, rt.type_name, rt.type_name_en,
+        rt.price_monthly AS room_type_price_monthly,
+        ub.rent_amount AS bill_rent_amount,
         ub.water_amount,
         ub.elec_amount,
         ub.other_fees,
@@ -256,6 +258,10 @@ $paymentDueDay = $pdo->query("SELECT payment_due_day FROM settings LIMIT 1")->fe
 
 // Calculate payment status for each tenant based on settings
 foreach ($tenants as &$tenant) {
+    $tenant['display_rent'] = $tenant['bill_rent_amount'] !== null
+        ? (float) $tenant['bill_rent_amount']
+        : calculateMonthlyTenantRentForMonth($tenant, $monthFilter);
+
     // First determine base payment status from bill data
     if (($tenant['payment_confirmation_status'] ?? null) === 'pending_verify') {
         $tenant['payment_status'] = 'pending_verify';
@@ -487,12 +493,12 @@ include __DIR__ . '/../../includes/header.php';
                 <tr>
                     <td style="text-align: center;"><?php echo $tenant['room_number']; ?></td>
                     <td style="text-align: center;"><?php echo htmlspecialchars($tenant['tenant_name']); ?></td>
-                    <td style="text-align: center;"><?php echo formatCurrency($tenant['monthly_rent']); ?></td>
+                    <td style="text-align: center;"><?php echo formatCurrency($tenant['display_rent']); ?></td>
                     <td style="text-align: center;"><?php echo formatCurrency($tenant['water_amount'] ?? 0); ?></td>
                     <td style="text-align: center;"><?php echo formatCurrency($tenant['elec_amount'] ?? 0); ?></td>
                     <td style="text-align: center;"><?php echo formatCurrency($tenant['other_fees'] ?? 0); ?></td>
                     <td style="text-align: center;"><?php echo formatCurrency($tenant['discount'] ?? 0); ?></td>
-                    <td style="text-align: center;" class="fw-bold"><?php echo formatCurrency($tenant['total_amount'] ?? $tenant['monthly_rent']); ?></td>
+                    <td style="text-align: center;" class="fw-bold"><?php echo formatCurrency($tenant['total_amount'] ?? $tenant['display_rent']); ?></td>
                     <td style="text-align: center;">
                         <?php 
                         echo '<span class="badge bg-' . $status['class'] . '">' . $status['label'] . '</span>';

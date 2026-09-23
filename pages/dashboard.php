@@ -137,33 +137,40 @@ include __DIR__ . '/../includes/header.php';
         flex-wrap: nowrap;
         overflow-x: auto;
         gap: 0.35rem;
-        padding-bottom: 0.4rem;
+        padding-bottom: 0.3rem;
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
     }
     .stat-cards-scroll::-webkit-scrollbar { display: none; }
     .stat-cards-scroll .stat-card-item {
         flex: 0 0 auto;
-        min-width: 135px;
-        width: calc(38% - 0.35rem);
+        width: 125px;
+        min-width: 110px;
+    }
+    .stat-cards-scroll .card,
+    .stat-cards-scroll .repair-stat-card,
+    .stat-cards-scroll .app-stat-card {
+        min-height: 52px !important;
+        border-radius: 12px !important;
     }
     .stat-cards-scroll .card-body {
-        padding: 0.45rem 0.3rem;
+        padding: 0.35rem 0.25rem !important;
         text-align: center;
+        min-height: 52px;
     }
     .stat-cards-scroll .card-body .d-flex {
         flex-direction: column;
         align-items: center;
     }
     .stat-cards-scroll .card-body h6 {
-        font-size: 0.7rem;
-        line-height: 1.25;
-        margin-bottom: 0.2rem;
+        font-size: 0.68rem;
+        line-height: 1.2;
+        margin-bottom: 0.15rem;
         word-break: break-word;
         white-space: normal;
     }
     .stat-cards-scroll .card-body h3 {
-        font-size: 0.9rem;
+        font-size: 0.95rem;
         line-height: 1;
         margin-bottom: 0;
         white-space: nowrap;

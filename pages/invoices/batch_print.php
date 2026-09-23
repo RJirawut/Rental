@@ -42,7 +42,7 @@ foreach ($invoices as $invoice) {
     
     // Get tenant name
     if ($invoice['tenant_type'] === 'daily') {
-        $stmt = $pdo->prepare("SELECT guest_name as name, phone FROM daily_tenants WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT guest_name as name, phone, status FROM daily_tenants WHERE id = ?");
     } else {
         $stmt = $pdo->prepare("SELECT tenant_name as name, phone FROM monthly_tenants WHERE id = ?");
     }
@@ -204,35 +204,75 @@ $printAllLabel = $lang === 'en'
                 </tfoot>
             </table>
 
-            <div class="row align-items-stretch qr-code-grid">
-                <div class="col-4 text-center">
-                    <?php if (!empty($settings['promptpay_id'])): ?>
+            <?php $isInvoicePaid = checkInvoicePaid($pdo, $invoice, $tenant); ?>
+            <?php if ($isInvoicePaid): ?>
+                <div class="row align-items-stretch qr-code-grid justify-content-center">
+                    <div class="col-6 col-md-4 text-center">
+                        <?php
+                        $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
+                        $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
+                        ?>
+                        <div class="qr-card">
+                            <p>🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
+                            <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
+                            <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
+                        </div>
+                    </div>
+                </div>
+            <?php elseif (!empty($settings['promptpay_id'])): ?>
+                <div class="row align-items-stretch qr-code-grid">
+                    <div class="col-4 text-center">
                         <?php echo buildPaymentQRBlockHtml($settings, (float) $invoice['grand_total']); ?>
-                    <?php endif; ?>
-                </div>
-                <div class="col-4 text-center">
-                    <?php
-                    $paymentNoticeUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment-notice.php');
-                    $paymentNoticeQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($paymentNoticeUrl);
-                    ?>
-                    <div class="qr-card">
-                        <p>💳 <?php echo $lang === 'en' ? 'Payment Confirmation' : 'แจ้งชำระเงิน'; ?></p>
-                        <div class="qr-image-slot"><img src="<?php echo $paymentNoticeQrUrl; ?>" alt="Payment Confirmation QR"></div>
-                        <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to submit payment slip' : 'สแกนเพื่อแจ้งชำระเงิน'; ?></p>
+                    </div>
+                    <div class="col-4 text-center">
+                        <?php
+                        $paymentNoticeUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment-notice.php');
+                        $paymentNoticeQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($paymentNoticeUrl);
+                        ?>
+                        <div class="qr-card">
+                            <p>💳 <?php echo $lang === 'en' ? 'Payment Confirmation' : 'แจ้งชำระเงิน'; ?></p>
+                            <div class="qr-image-slot"><img src="<?php echo $paymentNoticeQrUrl; ?>" alt="Payment Confirmation QR"></div>
+                            <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to submit payment slip' : 'สแกนเพื่อแจ้งชำระเงิน'; ?></p>
+                        </div>
+                    </div>
+                    <div class="col-4 text-center">
+                        <?php
+                        $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
+                        $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
+                        ?>
+                        <div class="qr-card">
+                            <p>🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
+                            <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
+                            <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
+                        </div>
                     </div>
                 </div>
-                <div class="col-4 text-center">
-                    <?php
-                    $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
-                    $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
-                    ?>
-                    <div class="qr-card">
-                        <p>🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
-                        <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
-                        <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
+            <?php else: ?>
+                <div class="row align-items-stretch qr-code-grid justify-content-center">
+                    <div class="col-6 col-md-4 text-center">
+                        <?php
+                        $paymentNoticeUrl = buildAbsoluteUrl(BASE_URL . 'pages/payment-notice.php');
+                        $paymentNoticeQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($paymentNoticeUrl);
+                        ?>
+                        <div class="qr-card">
+                            <p>💳 <?php echo $lang === 'en' ? 'Payment Confirmation' : 'แจ้งชำระเงิน'; ?></p>
+                            <div class="qr-image-slot"><img src="<?php echo $paymentNoticeQrUrl; ?>" alt="Payment Confirmation QR"></div>
+                            <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to submit payment slip' : 'สแกนเพื่อแจ้งชำระเงิน'; ?></p>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4 text-center">
+                        <?php
+                        $repairFormUrl = buildAbsoluteUrl(BASE_URL . 'pages/repair-request.php');
+                        $repairQrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=' . urlencode($repairFormUrl);
+                        ?>
+                        <div class="qr-card">
+                            <p>🔧 <?php echo $lang === 'en' ? 'Repair Request' : 'แจ้งซ่อมห้องพัก'; ?></p>
+                            <div class="qr-image-slot"><img src="<?php echo $repairQrUrl; ?>" alt="Repair Request QR"></div>
+                            <p class="qr-card-caption"><?php echo $lang === 'en' ? 'Scan to request repair' : 'สแกนเพื่อแจ้งซ่อม'; ?></p>
+                        </div>
                     </div>
                 </div>
-            </div>
+            <?php endif; ?>
             <div class="small mt-2">
                 <strong><?php echo t('notes'); ?>:</strong>
                 <ul class="mb-0 ps-3" style="list-style-type: '- ';">

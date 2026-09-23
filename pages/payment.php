@@ -106,6 +106,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    $transferDate = normalizeDateFilterValue($_POST['transfer_date'] ?? '');
+    $transferTime = trim($_POST['transfer_time'] ?? '');
+
+    if ($transferDate === '' || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $transferTime)) {
+        echo json_encode(['success' => false, 'message' => $isEnglish ? 'Please provide a valid transfer date and time.' : 'กรุณาระบุวันที่และเวลาโอนให้ถูกต้อง']);
+        exit;
+    }
+
     $slipFile = $_FILES['slip_image'] ?? null;
     $allowedSlipTypes = ['image/jpeg', 'image/png', 'image/webp'];
     $slipMimeType = is_array($slipFile) && isset($slipFile['tmp_name']) && is_uploaded_file($slipFile['tmp_name'])
@@ -136,18 +144,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException($upload['message']);
         }
         $slipFilename = $upload['filename'];
+        $trackingCode = generatePaymentTrackingCode();
 
         $stmtPc = $pdo->prepare("
             INSERT INTO payment_confirmations
-            (bill_type, bill_id, room_number, tenant_name, amount, payment_method, transfer_date, slip_image, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'promptpay', CURDATE(), ?, 'pending_verify', NOW())
+            (tracking_code, bill_type, bill_id, room_number, tenant_name, amount, payment_method, transfer_date, transfer_time, slip_image, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'promptpay', ?, ?, ?, 'pending_verify', NOW())
         ");
         $stmtPc->execute([
+            $trackingCode,
             $billType,
             $paymentRecord['id'],
             $roomNumber,
             $tenantName,
             $total,
+            $transferDate,
+            $transferTime,
             $slipFilename
         ]);
 
@@ -156,6 +168,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         echo json_encode([
             'success' => true,
+            'tracking_code' => $trackingCode,
+            'tracking_url' => BASE_URL . 'pages/payment-notice.php?ticket=' . urlencode($trackingCode),
             'message' => $isEnglish
                 ? 'Payment notice submitted successfully! Pending admin verification.'
                 : 'แจ้งชำระเงินเรียบร้อยแล้ว อยู่ระหว่างรอผู้ดูแลระบบตรวจสอบ',
@@ -206,6 +220,7 @@ $paymentHeading = $billType === 'daily'
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <style>
         body { font-family: 'Prompt', sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%); min-height: 100vh; display: flex; flex-direction: column; }
         .payment-container { max-width: 640px; margin: 2rem auto; width: 100%; padding: 0 1rem; flex: 1; }
@@ -222,6 +237,9 @@ $paymentHeading = $billType === 'daily'
         .logo-img { max-height: 80px; margin-bottom: 1rem; border-radius: .5rem; }
         .btn-primary { background-color: <?php echo htmlspecialchars($primaryColor); ?>; border-color: <?php echo htmlspecialchars($primaryColor); ?>; }
         .btn-primary:hover { filter: brightness(.9); }
+        .tracking-code-block { background: transparent; border: 0; box-shadow: none; padding: 0; margin: 1rem 0; }
+        .tracking-code-block .tracking-code-value { display: block; }
+        .tracking-code-block .tracking-actions { display: block; margin-top: .5rem; }
     </style>
 </head>
 <body>
@@ -246,14 +264,23 @@ $paymentHeading = $billType === 'daily'
                 <h3 class="mt-3"><?php echo $isEnglish ? 'Payment Completed' : 'ชำระเงินเรียบร้อยแล้ว'; ?></h3>
                 <?php if ($paidDate): ?><p class="text-muted"><?php echo t('paid_date'); ?>: <?php echo formatDate($paidDate); ?></p><?php endif; ?>
                 <div class="mt-4"><h2 class="text-success mb-0"><?php echo formatCurrency($total); ?> <?php echo t('baht'); ?></h2></div>
-                <p class="text-muted small mt-3"><?php echo $isEnglish ? 'This bill has been paid and cannot be scanned again.' : 'รายการนี้ชำระเงินแล้ว ไม่สามารถสแกนชำระซ้ำได้'; ?></p>
+
             </div>
         <?php elseif ($pendingConfirmation): ?>
             <div class="text-center py-4">
                 <i class="bi bi-hourglass-split text-warning" style="font-size: 4.5rem;"></i>
                 <h3 class="mt-3 fw-bold"><?php echo $isEnglish ? 'Payment Verification Pending' : 'แจ้งชำระเงินเรียบร้อยแล้ว'; ?></h3>
                 <p class="text-muted"><?php echo $isEnglish ? 'Your payment notice is currently pending admin review.' : 'ข้อมูลสลิปการโอนเงินของคุณถูกส่งเรียบร้อยแล้ว อยู่ระหว่างรอผู้ดูแลระบบตรวจสอบ'; ?></p>
-                <span class="badge bg-warning text-dark px-3 py-2 fs-6 mt-1 mb-3"><i class="bi bi-clock me-1"></i><?php echo t('pending_verify'); ?></span>
+                <div class="mb-2">
+                    <span class="badge bg-warning text-dark px-3 py-2 fs-6 mt-1"><i class="bi bi-clock me-1"></i><?php echo t('pending_verify'); ?></span>
+                </div>
+                <?php if (!empty($pendingConfirmation['tracking_code'])): ?>
+                    <div class="tracking-code-block text-center">
+                        <span class="small d-block text-muted"><?php echo t('tracking_code_label'); ?></span>
+                        <strong class="tracking-code-value font-monospace"><?php echo htmlspecialchars($pendingConfirmation['tracking_code']); ?></strong>
+                        <div class="tracking-actions"><a class="btn btn-sm btn-outline-primary" href="<?php echo BASE_URL; ?>pages/payment-notice.php?ticket=<?php echo urlencode($pendingConfirmation['tracking_code']); ?>"><?php echo t('track_status'); ?></a></div>
+                    </div>
+                <?php endif; ?>
                 <div class="card border-0 bg-light p-3 mt-3 text-start">
                     <div class="d-flex justify-content-between mb-2">
                         <span class="text-muted"><?php echo t('room'); ?>:</span>
@@ -339,8 +366,18 @@ $paymentHeading = $billType === 'daily'
                         <i class="bi bi-cloud-upload text-primary fs-5 me-2"></i>
                         <?php echo $isEnglish ? 'Upload Payment Slip' : 'แนบสลิปการโอนเงิน'; ?>
                     </h6>
+                    <div class="row g-2 mb-3 text-start">
+                        <div class="col-12 col-md-6">
+                            <label for="transfer_date" class="form-label small fw-bold text-muted"><?php echo t('transfer_date'); ?> <span class="text-danger">*</span></label>
+                            <input type="date" name="transfer_date" id="transfer_date" class="form-control" value="<?php echo date('Y-m-d'); ?>" required>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label for="transfer_time" class="form-label small fw-bold text-muted"><?php echo t('transfer_time'); ?> <span class="text-danger">*</span></label>
+                            <input type="text" name="transfer_time" id="transfer_time" class="form-control bg-white" value="<?php echo date('H:i'); ?>" placeholder="14:30" pattern="^([01]\d|2[0-3]):[0-5]\d$" maxlength="5" required>
+                        </div>
+                    </div>
                     <div class="mb-3 text-start">
-                        <label class="form-label small fw-bold text-muted"><?php echo t('upload_slip'); ?></label>
+                        <label class="form-label small fw-bold text-muted"><?php echo t('upload_slip'); ?> <span class="text-danger">*</span></label>
                         <input type="file" name="slip_image" class="form-control" accept="image/jpeg,image/png,image/webp" required>
                     </div>
                     <button type="submit" class="btn btn-primary btn-lg w-100 rounded-pill shadow-sm" id="submitBtn">
@@ -360,7 +397,21 @@ $paymentHeading = $billType === 'daily'
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
+function initTimePicker() {
+    if (typeof flatpickr !== 'undefined') {
+        flatpickr("#transfer_time", {
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: "H:i",
+            time_24hr: true,
+            allowInput: true
+        });
+    }
+}
+document.addEventListener('DOMContentLoaded', initTimePicker);
+
 function showQrCodeSection() {
     const qrArea = document.getElementById('qrCodeArea');
     const payBlock = document.getElementById('payActionBlock');

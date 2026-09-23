@@ -1277,7 +1277,7 @@ include __DIR__ . '/../includes/header.php';
                         <label class="form-label"><?php echo t('promptpay_id'); ?></label>
                         <input type="text" name="promptpay_id" class="form-control" 
                             value="<?php echo htmlspecialchars($settings['promptpay_id'] ?? ''); ?>" 
-                            placeholder="0812345678"
+                            placeholder=""
                             oninput="this.value = this.value.replace(/[^0-9]/g, '')">
                         <small class="text-muted"><?php echo t('promptpay_id_help'); ?></small>
                     </div>

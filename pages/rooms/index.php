@@ -212,11 +212,11 @@ include __DIR__ . '/../../includes/header.php';
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-sm-6 col-xl-3">
+    <div class="stat-cards-scroll mb-4">
+        <div class="stat-card-item">
             <div class="card app-stat-card app-stat-available h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
+                    <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <div class="app-stat-label"><?php echo t('available'); ?></div>
                             <div class="app-stat-value"><?php echo number_format($availableCount); ?></div>
@@ -226,10 +226,10 @@ include __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card-item">
             <div class="card app-stat-card app-stat-occupied h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
+                    <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <div class="app-stat-label"><?php echo t('occupied'); ?></div>
                             <div class="app-stat-value"><?php echo number_format($occupiedCount); ?></div>
@@ -239,10 +239,10 @@ include __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card-item">
             <div class="card app-stat-card app-stat-reserved h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
+                    <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <div class="app-stat-label"><?php echo t('reserved'); ?></div>
                             <div class="app-stat-value"><?php echo number_format($reservedCount); ?></div>
@@ -252,10 +252,10 @@ include __DIR__ . '/../../includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-12 col-sm-6 col-xl-3">
+        <div class="stat-card-item">
             <div class="card app-stat-card app-stat-maintenance h-100">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start">
+                    <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <div class="app-stat-label"><?php echo t('maintenance'); ?></div>
                             <div class="app-stat-value"><?php echo number_format($maintenanceCount); ?></div>

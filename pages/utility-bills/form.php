@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../includes/functions.php';
 
 requireLogin();
 ensureUtilityBillMeterResetColumns();
+ensureRoomTypePriceHistoryTable();
 
 $pageTitle = isset($_GET['id']) ? t('edit_meter_record') : t('record_utility_bills');
 
@@ -53,6 +54,15 @@ $settings = getSettings();
 
 // Get selected month from GET or POST
 $selectedMonth = $_GET['month'] ?? $_POST['bill_month'] ?? date('Y-m');
+$lang = $_SESSION['lang'] ?? 'th';
+$localizedMonthNames = localizedMonthNames($lang);
+$selectedMonthYear = (int) substr($selectedMonth, 0, 4);
+$selectedMonthNumber = (int) substr($selectedMonth, 5, 2);
+$monthFilterYears = range((int) date('Y') + 2, (int) date('Y') - 5);
+if (!in_array($selectedMonthYear, $monthFilterYears, true)) {
+    $monthFilterYears[] = $selectedMonthYear;
+}
+rsort($monthFilterYears);
 
 // If creating new but bill already exists for this tenant+month, treat as edit
 if ($id == 0 && $preselectedTenant > 0 && $selectedMonth) {
@@ -80,7 +90,7 @@ if (!$id && $preselectedTenant) {
 $tenants = [];
 if ($selectedMonth) {
     $stmt = $pdo->prepare("SELECT mt.id, mt.tenant_name, mt.phone, mt.contract_start, mt.monthly_rent,
-        r.room_number, rt.price_monthly
+        r.room_number, r.room_type_id, rt.price_monthly AS room_type_price_monthly
         FROM monthly_tenants mt 
         JOIN rooms r ON mt.room_id = r.id 
         JOIN room_types rt ON r.room_type_id = rt.id 
@@ -91,6 +101,16 @@ if ($selectedMonth) {
         LIMIT 50");
     $stmt->execute([$selectedMonth, $preselectedTenant, $preselectedTenant]);
     $tenants = $stmt->fetchAll();
+
+    foreach ($tenants as &$tenantOption) {
+        $isEditedBillTenant = $bill
+            && (int) $bill['tenant_id'] === (int) $tenantOption['id']
+            && ($bill['bill_month'] ?? '') === $selectedMonth;
+        $tenantOption['bill_monthly_rent'] = $isEditedBillTenant
+            ? (float) $bill['rent_amount']
+            : calculateMonthlyTenantRentForMonth($tenantOption, $selectedMonth);
+    }
+    unset($tenantOption);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -115,11 +135,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $discount = floatval($_POST['discount'] ?? 0);
     $notes = sanitize($_POST['notes'] ?? '');
     
-    // Get tenant info for rent amount
-    $stmt = $pdo->prepare("SELECT mt.monthly_rent, mt.room_id, mt.contract_start FROM monthly_tenants mt WHERE mt.id = ?");
+    // Use the rate that applies to this bill month. Editing an existing bill
+    // preserves its stored rent snapshot, even if room prices have changed.
+    $stmt = $pdo->prepare("
+        SELECT mt.monthly_rent, mt.room_id, mt.contract_start,
+               r.room_type_id, rt.price_monthly AS room_type_price_monthly
+        FROM monthly_tenants mt
+        JOIN rooms r ON r.id = mt.room_id
+        JOIN room_types rt ON rt.id = r.room_type_id
+        WHERE mt.id = ?
+    ");
     $stmt->execute([$tenantId]);
     $tenantData = $stmt->fetch();
-    $rentAmount = $tenantData['monthly_rent'] ?? 0;
+    $isSameExistingBill = $id > 0
+        && $bill
+        && (int) $bill['tenant_id'] === $tenantId
+        && ($bill['bill_month'] ?? '') === $billMonth;
+    $rentAmount = $isSameExistingBill
+        ? (float) $bill['rent_amount']
+        : calculateMonthlyTenantRentForMonth($tenantData ?: [], $billMonth);
     $roomId = $tenantData['room_id'] ?? 0;
     $contractStart = $tenantData['contract_start'] ?? null;
     
@@ -333,8 +367,28 @@ include __DIR__ . '/../../includes/header.php';
                         <div class="row">
                             <div class="col-md-12 mb-3">
                                 <label class="form-label"><?php echo t('bill_month'); ?> *</label>
-                                <input type="month" name="bill_month" id="bill_month" class="form-control" value="<?php echo $selectedMonth; ?>" required>
-                                <small class="text-muted"><?php echo t('bill_month_help'); ?></small>
+                                <div class="row g-2">
+                                    <div class="col-7 col-md-8">
+                                        <select id="bill_month_num" class="form-select" onchange="updateBillMonthValue()">
+                                            <?php foreach ($localizedMonthNames as $index => $mName): ?>
+                                                <option value="<?php echo sprintf('%02d', $index + 1); ?>" <?php echo $selectedMonthNumber === ($index + 1) ? 'selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars($mName); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-5 col-md-4">
+                                        <select id="bill_month_year" class="form-select" onchange="updateBillMonthValue()">
+                                            <?php foreach ($monthFilterYears as $yearOpt): ?>
+                                                <option value="<?php echo $yearOpt; ?>" <?php echo $selectedMonthYear === (int)$yearOpt ? 'selected' : ''; ?>>
+                                                    <?php echo $yearOpt; ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                </div>
+                                <input type="hidden" name="bill_month" id="bill_month" value="<?php echo $selectedMonth; ?>">
+
                             </div>
                         </div>
                         
@@ -346,8 +400,8 @@ include __DIR__ . '/../../includes/header.php';
                                 <select name="tenant_id" id="tenant_id" class="form-select" required>
                                     <option value=""><?php echo t('select_tenant'); ?></option>
                                     <?php foreach ($tenants as $t): ?>
-                                    <option value="<?php echo $t['id']; ?>" data-rent="<?php echo $t['monthly_rent']; ?>" data-contract-start="<?php echo htmlspecialchars($t['contract_start'] ?? ''); ?>" <?php echo (($bill['tenant_id'] ?? $preselectedTenant) == $t['id']) ? 'selected' : ''; ?>>
-                                        <?php echo sprintf(t('tenant_room_rent_format'), $t['room_number'], $t['tenant_name'], formatCurrency($t['monthly_rent'])); ?>
+                                    <option value="<?php echo $t['id']; ?>" data-rent="<?php echo $t['bill_monthly_rent']; ?>" data-contract-start="<?php echo htmlspecialchars($t['contract_start'] ?? ''); ?>" <?php echo (($bill['tenant_id'] ?? $preselectedTenant) == $t['id']) ? 'selected' : ''; ?>>
+                                        <?php echo sprintf(t('tenant_room_rent_format'), $t['room_number'], $t['tenant_name'], formatCurrency($t['bill_monthly_rent'])); ?>
                                     </option>
                                     <?php endforeach; ?>
                                 </select>
@@ -596,6 +650,18 @@ include __DIR__ . '/../../includes/header.php';
 </div>
 
 <script>
+function updateBillMonthValue() {
+    const mNumEl = document.getElementById('bill_month_num');
+    const mYearEl = document.getElementById('bill_month_year');
+    if (!mNumEl || !mYearEl) return;
+    const newMonth = mYearEl.value + '-' + mNumEl.value;
+    const hiddenInput = document.getElementById('bill_month');
+    if (hiddenInput && hiddenInput.value !== newMonth) {
+        hiddenInput.value = newMonth;
+        hiddenInput.dispatchEvent(new Event('change'));
+    }
+}
+
 // Helper functions for translation
 function t(key) {
     const translations = {
@@ -668,9 +734,9 @@ function loadTenantsForMonth(month, searchTerm = '') {
                 data.tenants.forEach(tenant => {
                     const option = document.createElement('option');
                     option.value = tenant.id;
-                    option.dataset.rent = tenant.monthly_rent;
+                    option.dataset.rent = tenant.bill_monthly_rent;
                     option.dataset.contractStart = tenant.contract_start || '';
-                    option.textContent = `${t('room')} ${tenant.room_number} - ${tenant.tenant_name} (${tenant.monthly_rent.toLocaleString('th-TH', {minimumFractionDigits: 2})}/${t('per_month')})`;
+                    option.textContent = `${t('room')} ${tenant.room_number} - ${tenant.tenant_name} (${Number(tenant.bill_monthly_rent).toLocaleString('th-TH', {minimumFractionDigits: 2})}/${t('per_month')})`;
                     tenantSelect.appendChild(option);
                 });
                 document.querySelector('button[type="submit"]').disabled = false;
@@ -1214,7 +1280,10 @@ document.getElementById('btnPreviewSave').addEventListener('click', function() {
     const selectedOption = tenantSelect.options[tenantSelect.selectedIndex];
     
     document.getElementById('confirmTenant').textContent = selectedOption ? selectedOption.textContent : '-';
-    document.getElementById('confirmMonth').textContent = document.getElementById('bill_month').value;
+    const mNumSelect = document.getElementById('bill_month_num');
+    const mYearSelect = document.getElementById('bill_month_year');
+    const monthText = (mNumSelect ? mNumSelect.options[mNumSelect.selectedIndex].text : '') + ' ' + (mYearSelect ? mYearSelect.value : '');
+    document.getElementById('confirmMonth').textContent = monthText.trim() || document.getElementById('bill_month').value;
     document.getElementById('confirmRent').textContent = parseFloat(document.getElementById('rent_amount').value).toLocaleString('th-TH', {minimumFractionDigits: 2}) + ' ฿';
     document.getElementById('confirmWater').textContent = parseFloat(document.getElementById('water_amount').value).toLocaleString('th-TH', {minimumFractionDigits: 2}) + ' ฿';
     document.getElementById('confirmWaterUnits').textContent = document.getElementById('water_units').value;

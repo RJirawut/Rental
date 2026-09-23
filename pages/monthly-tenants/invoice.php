@@ -20,7 +20,12 @@ if ($tenantId === 0) {
 }
 
 // Get tenant details
-$stmt = $pdo->prepare("SELECT mt.*, r.room_number, rt.type_name, rt.type_name_en FROM monthly_tenants mt JOIN rooms r ON mt.room_id = r.id JOIN room_types rt ON r.room_type_id = rt.id WHERE mt.id = ?");
+$stmt = $pdo->prepare("SELECT mt.*, r.room_number, r.room_type_id, rt.type_name, rt.type_name_en,
+    rt.price_monthly AS room_type_price_monthly
+    FROM monthly_tenants mt
+    JOIN rooms r ON mt.room_id = r.id
+    JOIN room_types rt ON r.room_type_id = rt.id
+    WHERE mt.id = ?");
 $stmt->execute([$tenantId]);
 $tenant = $stmt->fetch();
 
@@ -83,7 +88,8 @@ $stmt->execute([$tenantId, $billingMonth]);
 $latestBill = $stmt->fetch();
 
 // Calculate totals
-$rentAmount = $latestBill ? $latestBill['rent_amount'] : $tenant['monthly_rent'];
+$calculatedMonthlyRent = calculateMonthlyTenantRentForMonth($tenant, $billingMonth);
+$rentAmount = $latestBill ? $latestBill['rent_amount'] : $calculatedMonthlyRent;
 $waterAmount = $latestBill ? $latestBill['water_amount'] : 0;
 $elecAmount = $latestBill ? $latestBill['elec_amount'] : 0;
 $otherFees = $latestBill ? $latestBill['other_fees'] : 0;

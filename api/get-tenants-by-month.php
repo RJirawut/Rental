@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/functions.php';
 header('Content-Type: application/json');
 
 requireApiLogin();
+ensureRoomTypePriceHistoryTable();
 
 $month = $_GET['month'] ?? '';
 $search = trim($_GET['search'] ?? '');
@@ -30,7 +31,7 @@ if (!empty($month)) {
         }
 
         $stmt = $pdo->prepare("SELECT mt.id, mt.tenant_name, mt.phone, mt.contract_start, mt.monthly_rent,
-                r.room_number, rt.price_monthly
+                r.room_number, r.room_type_id, rt.price_monthly AS room_type_price_monthly
             FROM monthly_tenants mt 
             JOIN rooms r ON mt.room_id = r.id 
             JOIN room_types rt ON r.room_type_id = rt.id 
@@ -41,6 +42,10 @@ if (!empty($month)) {
         $stmt->execute($params);
         
         $tenants = $stmt->fetchAll();
+        foreach ($tenants as &$tenant) {
+            $tenant['bill_monthly_rent'] = calculateMonthlyTenantRentForMonth($tenant, $month);
+        }
+        unset($tenant);
         
         $response['success'] = true;
         $response['tenants'] = $tenants;

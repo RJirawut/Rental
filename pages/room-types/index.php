@@ -8,6 +8,14 @@ mb_internal_encoding('UTF-8');
 
 requireLogin();
 
+// Run the one-time compatibility sync for installations upgraded in place.
+// It only inserts a baseline for room types that have no price history yet.
+try {
+    ensureRoomTypePriceHistoryTable();
+} catch (Throwable $e) {
+    error_log('Room type price history sync failed: ' . $e->getMessage());
+}
+
 $pageTitle = t('room_types');
 $search = trim($_GET['search'] ?? '');
 $itemsPerPage = 50;

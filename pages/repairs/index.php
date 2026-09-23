@@ -487,9 +487,41 @@ include __DIR__ . '/../../includes/header.php';
                                             <a href="view.php?id=<?php echo $r['id']; ?>" class="btn btn-sm btn-primary" title="<?php echo t('view'); ?>">
                                                 <i class="bi bi-search"></i>
                                             </a>
-                                            <button type="button" class="btn btn-sm btn-warning" onclick="openRepairModal(<?php echo $r['id']; ?>)" title="<?php echo t('edit'); ?>">
-                                                <i class="bi bi-pencil"></i>
-                                            </button>
+                                            <?php if ($r['status'] === 'pending'): ?>
+                                            <form method="POST" action="" class="d-inline" onsubmit="return confirm('<?php echo t('confirm_in_progress') ?: 'เปลี่ยนสถานะเป็นกำลังดำเนินการ?'; ?>')">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="action" value="update_status">
+                                                <input type="hidden" name="id" value="<?php echo $r['id']; ?>">
+                                                <input type="hidden" name="status" value="in_progress">
+                                                <input type="hidden" name="admin_note" value="<?php echo htmlspecialchars($r['admin_note'] ?? ''); ?>">
+                                                <button type="submit" class="btn btn-sm btn-info text-white" title="<?php echo t('status_in_progress'); ?>">
+                                                    <i class="bi bi-arrow-repeat"></i>
+                                                </button>
+                                            </form>
+                                            <?php elseif ($r['status'] === 'in_progress'): ?>
+                                            <form method="POST" action="" class="d-inline" onsubmit="return confirm('<?php echo t('confirm_completed') ?: 'เปลี่ยนสถานะเป็นเสร็จสิ้น?'; ?>')">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="action" value="update_status">
+                                                <input type="hidden" name="id" value="<?php echo $r['id']; ?>">
+                                                <input type="hidden" name="status" value="completed">
+                                                <input type="hidden" name="admin_note" value="<?php echo htmlspecialchars($r['admin_note'] ?? ''); ?>">
+                                                <button type="submit" class="btn btn-sm btn-success" title="<?php echo t('status_completed'); ?>">
+                                                    <i class="bi bi-check2-circle"></i>
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
+                                            <?php if ($r['status'] === 'pending' || $r['status'] === 'in_progress'): ?>
+                                            <form method="POST" action="" class="d-inline" onsubmit="return confirm('<?php echo t('confirm_cancelled'); ?>')">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="action" value="update_status">
+                                                <input type="hidden" name="id" value="<?php echo $r['id']; ?>">
+                                                <input type="hidden" name="status" value="cancelled">
+                                                <input type="hidden" name="admin_note" value="<?php echo htmlspecialchars($r['admin_note'] ?? ''); ?>">
+                                                <button type="submit" class="btn btn-sm btn-secondary" title="<?php echo t('status_cancelled'); ?>">
+                                                    <i class="bi bi-x-circle"></i>
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
                                             <form method="POST" action="" class="d-inline" onsubmit="return confirm('<?php echo t('confirm_delete'); ?>')">
                                                 <?php echo csrfInput(); ?>
                                                 <input type="hidden" name="action" value="delete">

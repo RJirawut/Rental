@@ -44,13 +44,16 @@ switch ($action) {
         
     case 'get_room_price':
         $roomId = intval($_GET['room_id'] ?? 0);
+        $rateDate = normalizeDateFilterValue($_GET['date'] ?? date('Y-m-d'));
         
-        if ($roomId) {
-            $stmt = $pdo->prepare("SELECT rt.price_daily, rt.price_monthly FROM rooms r JOIN room_types rt ON r.room_type_id = rt.id WHERE r.id = ?");
+        if ($roomId && $rateDate !== '') {
+            $stmt = $pdo->prepare("SELECT room_type_id FROM rooms WHERE id = ?");
             $stmt->execute([$roomId]);
             $result = $stmt->fetch();
             
-            echo json_encode($result);
+            echo json_encode($result
+                ? getRoomTypePriceForDate((int) $result['room_type_id'], $rateDate)
+                : ['error' => 'Room not found']);
         } else {
             echo json_encode(['error' => 'Missing room_id']);
         }
