@@ -41,7 +41,7 @@ $currentUser = getCurrentUser();
 <html lang="<?php echo $lang; ?>">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
     <title><?php echo isset($pageTitle) ? $pageTitle : t('app_name'); ?></title>
     <?php if (!empty($settings['logo'])): ?>
     <link rel="icon" type="image/png" href="<?php echo BASE_URL; ?>uploads/logo/<?php echo htmlspecialchars($settings['logo']); ?>">
@@ -475,34 +475,68 @@ $currentUser = getCurrentUser();
             background: rgba(220, 53, 69, 0.9);
             color: white;
         }
+        html, body {
+            max-width: 100%;
+            overflow-x: hidden;
+            -webkit-text-size-adjust: 100%;
+        }
+        .sidebar-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(2px);
+            -webkit-backdrop-filter: blur(2px);
+            z-index: 999;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+        }
+        .sidebar-backdrop.show {
+            opacity: 1;
+            visibility: visible;
+        }
         @media (max-width: 768px) {
             .sidebar {
                 transform: translateX(-100%);
-                transition: transform 0.3s;
+                transition: transform 0.3s ease;
+                box-shadow: 0 0 25px rgba(0,0,0,0.25);
             }
             .sidebar.show {
                 transform: translateX(0);
             }
             .main-content {
                 margin-left: 0;
+                padding: 14px 10px;
+                width: 100% !important;
+                max-width: 100% !important;
+                overflow-x: hidden;
+                box-sizing: border-box;
+            }
+            .content-wrapper {
+                padding: 16px 12px;
+                border-radius: 16px;
             }
             .topbar {
-                padding: 12px 15px;
-                margin-bottom: 20px;
+                padding: 10px 14px;
+                margin-bottom: 14px;
+                border-radius: 14px;
             }
             .topbar h4 {
-                font-size: 16px;
+                font-size: 15px;
                 flex: 1;
                 min-width: 0;
                 text-align: center;
             }
             .user-menu {
-                gap: 8px;
+                gap: 6px;
             }
             .user-avatar {
-                width: 30px;
-                height: 30px;
-                font-size: 12px;
+                width: 32px;
+                height: 32px;
+                font-size: 13px;
             }
             .btn-sm {
                 font-size: 12px;
@@ -510,14 +544,23 @@ $currentUser = getCurrentUser();
             }
         }
         @media (max-width: 576px) {
+            .main-content {
+                padding: 8px 6px;
+            }
+            .content-wrapper {
+                padding: 12px 8px;
+                border-radius: 14px;
+            }
             .topbar {
-                padding: 8px 12px;
+                padding: 8px 10px;
+                margin-bottom: 10px;
+                border-radius: 12px;
                 align-items: center;
                 flex-wrap: nowrap;
-                gap: 8px;
+                gap: 6px;
             }
             .topbar h4 {
-                font-size: 14px;
+                font-size: 13.5px;
                 flex: 1;
                 margin: 0;
                 text-align: center;
@@ -529,6 +572,7 @@ $currentUser = getCurrentUser();
             #sidebarToggle {
                 flex: 0 0 auto;
                 order: 0;
+                padding: 5px 8px;
             }
             .user-menu {
                 flex: 0 0 auto;
@@ -556,9 +600,12 @@ $currentUser = getCurrentUser();
     </style>
 </head>
 <body>
+    <!-- Sidebar Backdrop for Mobile -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
-        <button class="btn btn-sm btn-outline-secondary sidebar-close d-md-none" id="sidebarClose">
+        <button class="btn btn-sm btn-outline-secondary sidebar-close d-md-none" id="sidebarClose" aria-label="Close sidebar">
             <i class="bi bi-x-lg"></i>
         </button>
         
@@ -764,23 +811,49 @@ $currentUser = getCurrentUser();
             const sidebarToggle = document.getElementById('sidebarToggle');
             const sidebarClose = document.getElementById('sidebarClose');
             const sidebar = document.getElementById('sidebar');
+            const sidebarBackdrop = document.getElementById('sidebarBackdrop');
             
-            // Open sidebar
-            sidebarToggle.addEventListener('click', function() {
-                sidebar.classList.add('show');
-            });
+            function openSidebar() {
+                if (sidebar) sidebar.classList.add('show');
+                if (sidebarBackdrop) sidebarBackdrop.classList.add('show');
+                document.body.style.overflow = 'hidden';
+            }
             
-            // Close sidebar
-            sidebarClose.addEventListener('click', function() {
-                sidebar.classList.remove('show');
-            });
+            function closeSidebar() {
+                if (sidebar) sidebar.classList.remove('show');
+                if (sidebarBackdrop) sidebarBackdrop.classList.remove('show');
+                document.body.style.overflow = '';
+            }
             
-            // Close sidebar when clicking outside
+            if (sidebarToggle) {
+                sidebarToggle.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (sidebar && sidebar.classList.contains('show')) {
+                        closeSidebar();
+                    } else {
+                        openSidebar();
+                    }
+                });
+            }
+            
+            if (sidebarClose) {
+                sidebarClose.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    closeSidebar();
+                });
+            }
+            
+            if (sidebarBackdrop) {
+                sidebarBackdrop.addEventListener('click', closeSidebar);
+            }
+            
+            // Close sidebar when clicking outside on mobile
             document.addEventListener('click', function(e) {
                 if (window.innerWidth <= 768 && 
+                    sidebar && sidebar.classList.contains('show') && 
                     !sidebar.contains(e.target) && 
-                    !sidebarToggle.contains(e.target)) {
-                    sidebar.classList.remove('show');
+                    sidebarToggle && !sidebarToggle.contains(e.target)) {
+                    closeSidebar();
                 }
             });
         });

@@ -98,6 +98,13 @@ $printAllLabel = $lang === 'en'
         .qr-image-slot { display: flex; align-items: flex-start; justify-content: center; width: 100%; height: 80px; flex: 0 0 80px; }
         .qr-image-slot img { width: 80px; height: 80px; background-color: #fff; padding: 8px; border-radius: 8px; box-sizing: border-box; }
         .qr-card-caption { min-height: 32px; margin-top: 8px !important; color: #718096; font-size: 12px; line-height: 1.4; }
+        @media screen and (max-width: 576px) {
+            .invoice-page { padding: 12px 6px; }
+            .container { padding-left: 8px; padding-right: 8px; }
+            .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .table-responsive .table { min-width: 480px; font-size: 13px; }
+            .qr-code-grid > [class*="col-"] { flex: 0 0 100%; max-width: 100%; margin-bottom: 12px; }
+        }
         @media print {
             .no-print { display: none !important; }
             .invoice-page {
@@ -107,6 +114,8 @@ $printAllLabel = $lang === 'en'
                 margin: 0; 
                 padding: 0;
             }
+            .table-responsive { overflow: visible !important; }
+            .table-responsive .table { min-width: 100% !important; font-size: inherit; }
         }
         @media screen {
             .invoice-page {
@@ -161,48 +170,50 @@ $printAllLabel = $lang === 'en'
                 </div>
             </div>
             
+            <div class="table-responsive">
             <table class="table table-bordered">
                 <thead class="table-light">
                     <tr>
                         <th><?php echo t('invoice_item'); ?></th>
-                        <th class="text-center"><?php echo t('invoice_qty'); ?></th>
-                        <th class="text-end"><?php echo t('invoice_price'); ?></th>
-                        <th class="text-end"><?php echo t('invoice_amount'); ?></th>
+                        <th class="text-center text-nowrap"><?php echo t('invoice_qty'); ?></th>
+                        <th class="text-end text-nowrap"><?php echo t('invoice_price'); ?></th>
+                        <th class="text-end text-nowrap"><?php echo t('invoice_amount'); ?></th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($items as $item): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($item['item_description']); ?></td>
-                        <td class="text-center"><?php echo $item['quantity']; ?></td>
-                        <td class="text-end"><?php echo formatCurrency($item['unit_price']); ?></td>
-                        <td class="text-end"><?php echo formatCurrency($item['total_price']); ?></td>
+                        <td class="text-center text-nowrap"><?php echo $item['quantity']; ?></td>
+                        <td class="text-end text-nowrap"><?php echo formatCurrency($item['unit_price']); ?></td>
+                        <td class="text-end text-nowrap"><?php echo formatCurrency($item['total_price']); ?></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
                 <tfoot>
                     <tr>
                         <td colspan="3" class="text-end"><strong><?php echo t('invoice_subtotal'); ?></strong></td>
-                        <td class="text-end"><?php echo formatCurrency($invoice['subtotal']); ?></td>
+                        <td class="text-end text-nowrap"><?php echo formatCurrency($invoice['subtotal']); ?></td>
                     </tr>
                     <?php if ($hasTaxId): ?>
                     <tr>
                         <td colspan="3" class="text-end"><strong><?php echo t('invoice_vat'); ?> (<?php echo $invoice['vat_rate']; ?>%)</strong></td>
-                        <td class="text-end"><?php echo formatCurrency($invoice['vat_amount']); ?></td>
+                        <td class="text-end text-nowrap"><?php echo formatCurrency($invoice['vat_amount']); ?></td>
                     </tr>
                     <?php endif; ?>
                     <?php if ($invoice['discount'] > 0): ?>
                     <tr>
                         <td colspan="3" class="text-end"><strong><?php echo t('invoice_discount'); ?></strong></td>
-                        <td class="text-end text-danger">-<?php echo formatCurrency($invoice['discount']); ?></td>
+                        <td class="text-end text-danger text-nowrap">-<?php echo formatCurrency($invoice['discount']); ?></td>
                     </tr>
                     <?php endif; ?>
                     <tr class="table-primary">
                         <td colspan="3" class="text-end"><strong><?php echo t('invoice_grand_total'); ?></strong></td>
-                        <td class="text-end"><strong><?php echo formatCurrency($invoice['grand_total']); ?></strong></td>
+                        <td class="text-end text-nowrap"><strong><?php echo formatCurrency($invoice['grand_total']); ?></strong></td>
                     </tr>
                 </tfoot>
             </table>
+            </div>
 
             <?php $isInvoicePaid = checkInvoicePaid($pdo, $invoice, $tenant); ?>
             <?php if ($isInvoicePaid): ?>

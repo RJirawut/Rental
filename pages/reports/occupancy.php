@@ -143,32 +143,34 @@ include __DIR__ . '/../../includes/header.php';
             <h5 class="mb-0"><?php echo t('occupancy_details'); ?></h5>
         </div>
         <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th><?php echo $type === 'monthly' ? t('month') : t('year'); ?></th>
-                        <th class="text-center"><?php echo t('daily_guests'); ?></th>
-                        <th class="text-center"><?php echo t('monthly_tenants'); ?></th>
-                        <th class="text-center"><?php echo t('total'); ?></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($occupancyData as $data): ?>
-                    <tr>
-                        <td><?php echo $data['period']; ?></td>
-                        <td class="text-center"><?php echo number_format($data['daily']); ?> คน</td>
-                        <td class="text-center"><?php echo number_format($data['monthly']); ?> คน</td>
-                        <td class="text-center fw-bold"><?php echo number_format($data['total']); ?> คน</td>
-                    </tr>
-                    <?php endforeach; ?>
-                    <tr class="table-primary fw-bold">
-                        <td><?php echo t('total'); ?></td>
-                        <td class="text-center"><?php echo number_format($totalDaily); ?> คน</td>
-                        <td class="text-center"><?php echo number_format($totalMonthly); ?> คน</td>
-                        <td class="text-center"><?php echo number_format($grandTotal); ?> คน</td>
-                    </tr>
-                </tbody>
-            </table>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 text-nowrap">
+                    <thead class="table-light">
+                        <tr>
+                            <th><?php echo $type === 'monthly' ? t('month') : t('year'); ?></th>
+                            <th class="text-center"><?php echo t('daily_guests'); ?></th>
+                            <th class="text-center"><?php echo t('monthly_tenants'); ?></th>
+                            <th class="text-center"><?php echo t('total'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($occupancyData as $data): ?>
+                        <tr>
+                            <td><?php echo $data['period']; ?></td>
+                            <td class="text-center"><?php echo number_format($data['daily']); ?> คน</td>
+                            <td class="text-center"><?php echo number_format($data['monthly']); ?> คน</td>
+                            <td class="text-center fw-bold"><?php echo number_format($data['total']); ?> คน</td>
+                        </tr>
+                        <?php endforeach; ?>
+                        <tr class="table-primary fw-bold">
+                            <td><?php echo t('total'); ?></td>
+                            <td class="text-center"><?php echo number_format($totalDaily); ?> คน</td>
+                            <td class="text-center"><?php echo number_format($totalMonthly); ?> คน</td>
+                            <td class="text-center"><?php echo number_format($grandTotal); ?> คน</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>

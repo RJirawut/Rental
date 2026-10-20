@@ -72,22 +72,22 @@ include __DIR__ . '/../../includes/header.php';
     <div class="row justify-content-center">
         <div class="col-md-8">
             <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="card-header d-flex justify-content-between align-items-center invoice-card-header">
                     <h5 class="mb-0"><i class="bi bi-receipt me-2"></i><?php echo $documentType; ?></h5>
                     <div>
                         <a href="print.php?invoice_id=<?php echo $invoiceId; ?>" target="_blank" class="btn btn-sm btn-primary">
                             <i class="bi bi-printer me-1"></i><?php echo t('invoice_print'); ?>
                         </a>
                         <?php if ($hasTaxId): ?>
-                        <a href="print.php?invoice_id=<?php echo $invoiceId; ?>&type=invoice" target="_blank" class="btn btn-sm btn-info ms-2">
+                        <a href="print.php?invoice_id=<?php echo $invoiceId; ?>&type=invoice" target="_blank" class="btn btn-sm btn-info ms-1 ms-md-2">
                             <i class="bi bi-file-text me-1"></i><?php echo t('invoice_doc_tax'); ?>
                         </a>
                         <?php endif; ?>
-                        <a href="index.php" class="btn btn-sm btn-secondary ms-2"><?php echo t('invoice_back'); ?></a>
+                        <a href="index.php" class="btn btn-sm btn-secondary ms-1 ms-md-2"><?php echo t('invoice_back'); ?></a>
                     </div>
                 </div>
                 <div class="card-body">
-                    <div class="row mb-4">
+                    <div class="row mb-3 mb-md-4">
                         <div class="col-md-6">
                             <?php if ($settings['logo']): ?>
                             <img src="<?php echo BASE_URL; ?>assets/images/logo/<?php echo $settings['logo']; ?>" alt="Logo" style="max-height: 80px;" class="mb-3">
@@ -99,8 +99,8 @@ include __DIR__ . '/../../includes/header.php';
                             <p class="text-muted small"><?php echo t('invoice_tax_id_label'); ?>: <?php echo $settings['tax_id']; ?></p>
                             <?php endif; ?>
                         </div>
-                        <div class="col-md-6 text-md-end">
-                            <h4 class="text-primary"><?php echo $documentType; ?></h4>
+                        <div class="col-md-6 text-md-end invoice-meta-box">
+                            <h4 class="text-primary mb-1 mb-md-2"><?php echo $documentType; ?></h4>
                             <p class="mb-1"><strong><?php echo t('invoice_no'); ?>:</strong> <?php echo $invoice['invoice_number']; ?></p>
                             <p class="mb-1"><strong><?php echo t('invoice_date_label'); ?>:</strong> <?php echo formatDate($invoice['created_at']); ?></p>
                             <p class="mb-0"><strong><?php echo t('invoice_due_label'); ?>:</strong> <?php echo formatDate($invoice['due_date']); ?></p>
@@ -108,7 +108,7 @@ include __DIR__ . '/../../includes/header.php';
                     </div>
                     
                     <?php if ($invoice['tenant_type'] === 'daily'): ?>
-                    <div class="row mb-4">
+                    <div class="row mb-3 mb-md-4">
                         <div class="col-md-6">
                             <h6><?php echo t('invoice_customer'); ?>:</h6>
                             <p class="mb-1"><strong><?php echo htmlspecialchars($tenantName); ?></strong></p>
@@ -116,7 +116,7 @@ include __DIR__ . '/../../includes/header.php';
                             <p class="mb-0"><?php echo t('invoice_phone'); ?>: <?php echo $tenant['phone']; ?></p>
                             <?php endif; ?>
                         </div>
-                        <div class="col-md-6 text-md-end">
+                        <div class="col-md-6 text-md-end mt-2 mt-md-0">
                             <h6><?php echo t('invoice_stay_details'); ?>:</h6>
                             <p class="mb-1"><?php echo t('invoice_room_label'); ?>: <?php echo $invoice['room_number']; ?> <?php echo $typeName ? '(' . $typeName . ')' : ''; ?></p>
                             <?php if (!empty($tenant['check_in_date']) && !empty($tenant['check_out_date'])): ?>
@@ -126,14 +126,14 @@ include __DIR__ . '/../../includes/header.php';
                         </div>
                     </div>
                     <?php else: ?>
-                    <div class="row mb-4">
+                    <div class="row mb-3 mb-md-4">
                         <div class="col-md-6">
                             <p class="mb-1"><?php echo t('invoice_customer'); ?>: <strong><?php echo htmlspecialchars($tenantName); ?></strong></p>
                             <?php if (!empty($tenant['phone'])): ?>
                             <p class="mb-0"><?php echo t('invoice_phone'); ?>: <?php echo $tenant['phone']; ?></p>
                             <?php endif; ?>
                         </div>
-                        <div class="col-md-6 text-md-end">
+                        <div class="col-md-6 text-md-end mt-2 mt-md-0">
                             <h6><?php echo t('invoice_contract_info'); ?>:</h6>
                             <p class="mb-1"><?php echo t('invoice_room_label'); ?>: <?php echo $invoice['room_number']; ?></p>
                             <?php if (!empty($tenant['contract_start']) && !empty($tenant['contract_end'])): ?>
@@ -163,76 +163,80 @@ include __DIR__ . '/../../includes/header.php';
                     </div>
                     <?php endif; ?>
                     
-                    <table class="table table-bordered">
-                        <thead class="table-light">
-                            <tr>
-                                <th><?php echo t('invoice_item'); ?></th>
-                                <th class="text-center"><?php echo t('invoice_qty'); ?></th>
-                                <th class="text-end"><?php echo t('invoice_price'); ?></th>
-                                <th class="text-end"><?php echo t('invoice_amount'); ?></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($items as $item): ?>
-                            <tr>
-                                <td><?php $itemDesc = htmlspecialchars(str_replace('ค่าอื่นๆ', 'อื่นๆ', $item['item_description'])); $roomLabel = t('invoice_room_label'); echo preg_replace('/' . preg_quote($roomLabel, '/') . '\s+(\d+)/', '(' . $roomLabel . ' $1)', $itemDesc); ?></td>
-                                <td class="text-center"><?php $isUtilityItem = in_array($item['item_description'], ['ค่าน้ำ', 'ค่าไฟฟ้า']); echo ($invoice['tenant_type'] === 'monthly' && $item['quantity'] == 1 && !$isUtilityItem) ? '1 ' . t('invoice_month_unit') : ($isUtilityItem ? (int)$item['quantity'] . ' ' . t('invoice_units') : $item['quantity']); ?></td>
-                                <td class="text-end"><?php echo formatCurrency($item['unit_price']); ?></td>
-                                <td class="text-end"><?php echo formatCurrency($item['total_price']); ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="3" class="text-end"><strong><?php echo t('invoice_subtotal'); ?></strong></td>
-                                <td class="text-end"><?php echo formatCurrency($invoice['subtotal']); ?></td>
-                            </tr>
-                            <?php if ($hasTaxId && $invoice['vat_amount'] > 0): ?>
-                            <tr>
-                                <td colspan="3" class="text-end"><strong><?php echo t('invoice_vat'); ?> (<?php echo $invoice['vat_rate']; ?>%)</strong></td>
-                                <td class="text-end"><?php echo formatCurrency($invoice['vat_amount']); ?></td>
-                            </tr>
-                            <?php endif; ?>
-                            <tr class="table-primary">
-                                <td colspan="3" class="text-end"><strong><?php echo t('invoice_grand_total'); ?></strong></td>
-                                <td class="text-end"><strong><?php echo formatCurrency($invoice['grand_total']); ?></strong></td>
-                            </tr>
-                        </tfoot>
-                    </table>
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-invoice align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th><?php echo t('invoice_item'); ?></th>
+                                    <th class="text-center text-nowrap"><?php echo t('invoice_qty'); ?></th>
+                                    <th class="text-end text-nowrap"><?php echo t('invoice_price'); ?></th>
+                                    <th class="text-end text-nowrap"><?php echo t('invoice_amount'); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($items as $item): ?>
+                                <tr>
+                                    <td><?php $itemDesc = htmlspecialchars(str_replace('ค่าอื่นๆ', 'อื่นๆ', $item['item_description'])); $roomLabel = t('invoice_room_label'); echo preg_replace('/' . preg_quote($roomLabel, '/') . '\s+(\d+)/', '(' . $roomLabel . ' $1)', $itemDesc); ?></td>
+                                    <td class="text-center text-nowrap"><?php $isUtilityItem = in_array($item['item_description'], ['ค่าน้ำ', 'ค่าไฟฟ้า']); echo ($invoice['tenant_type'] === 'monthly' && $item['quantity'] == 1 && !$isUtilityItem) ? '1 ' . t('invoice_month_unit') : ($isUtilityItem ? (int)$item['quantity'] . ' ' . t('invoice_units') : $item['quantity']); ?></td>
+                                    <td class="text-end text-nowrap"><?php echo formatCurrency($item['unit_price']); ?></td>
+                                    <td class="text-end text-nowrap"><?php echo formatCurrency($item['total_price']); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="3" class="text-end"><strong><?php echo t('invoice_subtotal'); ?></strong></td>
+                                    <td class="text-end text-nowrap"><?php echo formatCurrency($invoice['subtotal']); ?></td>
+                                </tr>
+                                <?php if ($hasTaxId && $invoice['vat_amount'] > 0): ?>
+                                <tr>
+                                    <td colspan="3" class="text-end"><strong><?php echo t('invoice_vat'); ?> (<?php echo $invoice['vat_rate']; ?>%)</strong></td>
+                                    <td class="text-end text-nowrap"><?php echo formatCurrency($invoice['vat_amount']); ?></td>
+                                </tr>
+                                <?php endif; ?>
+                                <tr class="table-primary">
+                                    <td colspan="3" class="text-end"><strong><?php echo t('invoice_grand_total'); ?></strong></td>
+                                    <td class="text-end text-nowrap"><strong><?php echo formatCurrency($invoice['grand_total']); ?></strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
 
                     <?php if (!empty($outstandingBills)): ?>
                     <div class="alert alert-danger py-2 mb-3 mt-3">
                         <h5 class="mb-0"><i class="bi bi-exclamation-triangle me-2"></i><?php echo $lang === 'en' ? 'Outstanding Balance' : 'ยอดค้างชำระ'; ?></h5>
                     </div>
-                    <table class="table table-bordered">
-                        <thead class="table-light">
-                            <tr>
-                                <th><?php echo t('invoice_item'); ?></th>
-                                <th class="text-center"><?php echo t('invoice_qty'); ?></th>
-                                <th class="text-end"><?php echo t('invoice_price'); ?></th>
-                                <th class="text-end"><?php echo t('invoice_amount'); ?></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($outstandingBills as $ob): ?>
-                            <tr>
-                                <td>
-                                    <i class="bi bi-exclamation-triangle me-1"></i>
-                                    <?php echo $lang === 'en' ? 'Outstanding' : 'ค้างชำระ'; ?> - <?php echo formatBillMonth($ob['bill_month'], $lang); ?>
-                                </td>
-                                <td class="text-center">1 <?php echo t('invoice_month_unit'); ?></td>
-                                <td class="text-end"><?php echo formatCurrency($ob['total_amount']); ?></td>
-                                <td class="text-end fw-bold"><?php echo formatCurrency($ob['total_amount']); ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                        <tfoot>
-                            <tr class="table-danger">
-                                <td colspan="3" class="text-end"><strong><?php echo $lang === 'en' ? 'Total Outstanding' : 'ยอดค้างชำระทั้งหมด'; ?></strong></td>
-                                <td class="text-end fw-bold"><?php echo formatCurrency($totalOutstanding); ?></td>
-                            </tr>
-                        </tfoot>
-                    </table>
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-invoice align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th><?php echo t('invoice_item'); ?></th>
+                                    <th class="text-center text-nowrap"><?php echo t('invoice_qty'); ?></th>
+                                    <th class="text-end text-nowrap"><?php echo t('invoice_price'); ?></th>
+                                    <th class="text-end text-nowrap"><?php echo t('invoice_amount'); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($outstandingBills as $ob): ?>
+                                <tr>
+                                    <td>
+                                        <i class="bi bi-exclamation-triangle me-1"></i>
+                                        <?php echo $lang === 'en' ? 'Outstanding' : 'ค้างชำระ'; ?> - <?php echo formatBillMonth($ob['bill_month'], $lang); ?>
+                                    </td>
+                                    <td class="text-center text-nowrap">1 <?php echo t('invoice_month_unit'); ?></td>
+                                    <td class="text-end text-nowrap"><?php echo formatCurrency($ob['total_amount']); ?></td>
+                                    <td class="text-end text-nowrap fw-bold"><?php echo formatCurrency($ob['total_amount']); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-danger">
+                                    <td colspan="3" class="text-end"><strong><?php echo $lang === 'en' ? 'Total Outstanding' : 'ยอดค้างชำระทั้งหมด'; ?></strong></td>
+                                    <td class="text-end text-nowrap fw-bold"><?php echo formatCurrency($totalOutstanding); ?></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
                     <div class="alert alert-primary py-2 mb-3">
                         <h5 class="mb-0"><?php echo $lang === 'en' ? 'Total Amount Due' : 'ยอดที่ต้องชำระทั้งหมด'; ?>: <?php echo formatCurrency($invoice['grand_total'] + $totalOutstanding); ?></h5>
                     </div>

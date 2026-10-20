@@ -1207,3 +1207,21 @@ Summary: processed 1, sent 1, failed 0, still pending 0
 Failed: SMTP is not configured.
 
 Summary: processed 1, sent 0, failed 0, still pending 1
+Failed: SMTP is not configured.
+
+Summary: processed 2, sent 0, failed 0, still pending 2
+Failed: SMTP is not configured.
+
+Summary: processed 3, sent 0, failed 1, still pending 2
+Failed: SMTP is not configured.
+
+Summary: processed 1, sent 0, failed 0, still pending 1
+Sent: jirawut.ru@gmail.com
+
+Summary: processed 1, sent 1, failed 0, still pending 0
+Sent: jirawut120300@gmail.com
+
+Summary: processed 1, sent 1, failed 0, still pending 0
+Sent: jirawut.ru@gmail.com
+
+Summary: processed 1, sent 1, failed 0, still pending 0

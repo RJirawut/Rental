@@ -1345,8 +1345,8 @@ include __DIR__ . '/../includes/header.php';
         <div class="col-md-12 mb-4">
             <hr class="my-4">
             <h5 class="mb-3"><i class="bi bi-file-earmark-excel me-2"></i><?php echo t('export_yearly_data'); ?></h5>
-            <div class="d-flex align-items-center gap-3">
-                <div class="input-group" style="max-width:300px;">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="input-group" style="max-width:300px; flex: 1 1 220px;">
                     <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
                     <select id="exportYearSelect" class="form-select">
                         <?php
@@ -1368,8 +1368,8 @@ include __DIR__ . '/../includes/header.php';
         <div class="col-md-12 mb-4">
             <hr class="my-4">
             <h5 class="mb-3 text-danger"><i class="bi bi-trash3 me-2"></i><?php echo t('clear_yearly_data'); ?></h5>
-            <div class="d-flex align-items-center gap-3 mt-3">
-                <div class="input-group" style="max-width:450px;">
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                <div class="input-group" style="max-width:450px; flex: 1 1 260px;">
                     <span class="input-group-text"><i class="bi bi-calendar-x"></i></span>
                     <select id="clearYearStartSelect" class="form-select">
                         <option value="" disabled><?php echo t('start_year'); ?></option>
@@ -1409,7 +1409,7 @@ include __DIR__ . '/../includes/header.php';
         </div>
         
         <div class="text-end mt-4">
-            <button type="submit" class="btn btn-primary btn-lg">
+            <button type="submit" class="btn btn-primary">
                 <i class="bi bi-save me-2"></i><?php echo t('save'); ?>
             </button>
         </div>

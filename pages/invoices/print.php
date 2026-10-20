@@ -126,9 +126,18 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, $invoice['te
         .qr-image-slot img { width: 80px; height: 80px; background-color: #fff; padding: 8px; border-radius: 8px; box-sizing: border-box; }
         .qr-payment-details { margin-top: 8px; }
         .qr-card-caption { min-height: 32px; margin-top: 8px !important; color: #718096; font-size: 12px; line-height: 1.4; }
+        @media screen and (max-width: 576px) {
+            body { padding: 12px 6px; }
+            .container { padding-left: 8px; padding-right: 8px; }
+            .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .table-responsive .table { min-width: 480px; font-size: 13px; }
+            .qr-code-grid > [class*="col-"] { flex: 0 0 100%; max-width: 100%; margin-bottom: 12px; }
+        }
         @media print {
             .no-print { display: none; }
             body { margin: 0; padding: 20px; }
+            .table-responsive { overflow: visible !important; }
+            .table-responsive .table { min-width: 100% !important; font-size: inherit; }
         }
     </style>
 </head>
@@ -199,22 +208,23 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, $invoice['te
         </div>
         <?php endif; ?>
         
+        <div class="table-responsive">
         <table class="table table-bordered">
             <thead class="table-light">
                 <tr>
                     <th><?php echo t('invoice_item'); ?></th>
-                    <th class="text-center"><?php echo t('invoice_qty'); ?></th>
-                    <th class="text-end"><?php echo t('invoice_price'); ?></th>
-                    <th class="text-end"><?php echo t('invoice_amount'); ?></th>
+                    <th class="text-center text-nowrap"><?php echo t('invoice_qty'); ?></th>
+                    <th class="text-end text-nowrap"><?php echo t('invoice_price'); ?></th>
+                    <th class="text-end text-nowrap"><?php echo t('invoice_amount'); ?></th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($items as $item): ?>
                 <tr>
                     <td><?php $itemDesc = htmlspecialchars(str_replace('ค่าอื่นๆ', 'อื่นๆ', $lang === 'en' && !empty($item['item_description_en']) ? $item['item_description_en'] : $item['item_description'])); $roomLabel = t('invoice_room_label'); echo preg_replace('/' . preg_quote($roomLabel, '/') . '\s+(\d+)/', '(' . $roomLabel . ' $1)', $itemDesc); ?></td>
-                    <td class="text-center"><?php $isUtilityItem = in_array($item['item_description'], ['ค่าน้ำ', 'ค่าไฟฟ้า']); echo ($invoice['tenant_type'] === 'monthly' && $item['quantity'] == 1 && !$isUtilityItem) ? '1 ' . t('invoice_month_unit') : ($isUtilityItem ? (int)$item['quantity'] . ' ' . t('invoice_units') : $item['quantity']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($item['unit_price']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($item['total_price']); ?></td>
+                    <td class="text-center text-nowrap"><?php $isUtilityItem = in_array($item['item_description'], ['ค่าน้ำ', 'ค่าไฟฟ้า']); echo ($invoice['tenant_type'] === 'monthly' && $item['quantity'] == 1 && !$isUtilityItem) ? '1 ' . t('invoice_month_unit') : ($isUtilityItem ? (int)$item['quantity'] . ' ' . t('invoice_units') : $item['quantity']); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($item['unit_price']); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($item['total_price']); ?></td>
                 </tr>
                 <?php endforeach; ?>
                 <?php if (!empty($outstandingBills)): ?>
@@ -224,9 +234,9 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, $invoice['te
                         <i class="bi bi-exclamation-triangle"></i>
                         <?php echo $lang === 'en' ? 'Outstanding' : 'ค้างชำระ'; ?> - <?php echo formatBillMonth($ob['bill_month'], $lang); ?>
                     </td>
-                    <td class="text-center">1 <?php echo t('invoice_month_unit'); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($ob['total_amount']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($ob['total_amount']); ?></td>
+                    <td class="text-center text-nowrap">1 <?php echo t('invoice_month_unit'); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($ob['total_amount']); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($ob['total_amount']); ?></td>
                 </tr>
                 <?php endforeach; ?>
                 <?php endif; ?>
@@ -235,32 +245,33 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, $invoice['te
                 <?php if (empty($outstandingBills)): ?>
                 <tr>
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_subtotal'); ?></strong></td>
-                    <td class="text-end"><?php echo formatCurrency($subtotal); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($subtotal); ?></td>
                 </tr>
                 <?php if ($hasTaxId): ?>
                 <tr>
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_vat'); ?> <?php echo $vatRate; ?>%</strong></td>
-                    <td class="text-end"><?php echo formatCurrency($vatAmount); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($vatAmount); ?></td>
                 </tr>
                 <?php endif; ?>
                 <?php if ($invoice['discount'] > 0): ?>
                 <tr>
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_discount'); ?></strong></td>
-                    <td class="text-end text-danger">-<?php echo formatCurrency($invoice['discount']); ?></td>
+                    <td class="text-end text-danger text-nowrap">-<?php echo formatCurrency($invoice['discount']); ?></td>
                 </tr>
                 <?php endif; ?>
                 <tr class="table-primary">
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_grand_total'); ?></strong></td>
-                    <td class="text-end"><strong><?php echo formatCurrency($grandTotal); ?></strong></td>
+                    <td class="text-end text-nowrap"><strong><?php echo formatCurrency($grandTotal); ?></strong></td>
                 </tr>
                 <?php else: ?>
                 <tr class="table-primary">
                     <td colspan="3" class="text-end"><strong><?php echo $lang === 'en' ? 'Total Amount Due' : 'ยอดที่ต้องชำระทั้งหมด'; ?></strong></td>
-                    <td class="text-end"><strong><?php echo formatCurrency($grandTotal + $totalOutstanding); ?></strong></td>
+                    <td class="text-end text-nowrap"><strong><?php echo formatCurrency($grandTotal + $totalOutstanding); ?></strong></td>
                 </tr>
                 <?php endif; ?>
             </tfoot>
         </table>
+        </div>
 
         <!-- QR Codes Section -->
         <?php $isInvoicePaid = checkInvoicePaid($pdo, $invoice, $tenant); ?>

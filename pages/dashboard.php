@@ -180,7 +180,7 @@ include __DIR__ . '/../includes/header.php';
 
     .room-status-card-body {
         min-height: auto !important;
-        padding: 0.75rem 0.25rem !important;
+        padding: 0.75rem 0.35rem !important;
     }
     .room-status-row {
         flex-wrap: nowrap !important;
@@ -194,17 +194,21 @@ include __DIR__ . '/../includes/header.php';
         max-width: 20%;
     }
     .room-status-row .mb-3 {
-        margin-bottom: 0.3rem !important;
+        margin-bottom: 0.25rem !important;
     }
     .room-status-row .bi {
-        font-size: 1.5rem !important;
+        font-size: 1.35rem !important;
     }
     .room-status-row h3 {
         font-size: 1.1rem !important;
+        margin-bottom: 0.15rem !important;
     }
     .room-status-row small {
-        font-size: 0.58rem !important;
-        white-space: nowrap;
+        font-size: 0.65rem !important;
+        line-height: 1.2;
+        word-break: break-word;
+        white-space: normal;
+        display: block;
     }
 }
 @media (min-width: 768px) {
@@ -360,58 +364,60 @@ include __DIR__ . '/../includes/header.php';
                 <a href="daily-tenants/index.php" class="btn btn-sm btn-primary"><?php echo t('view_all'); ?></a>
             </div>
             <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th><?php echo t('room'); ?></th>
-                            <th><?php echo t('name'); ?></th>
-                            <th><?php echo t('check_in'); ?></th>
-                            <th><?php echo t('status'); ?></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($recentDailyTenants as $tenant):
-                            // Mirror the same status rules used on daily-tenants/index.php.
-                            if ($tenant['status'] === 'checked_out') {
-                                $status = ['label' => t('checked_out'), 'class' => 'secondary'];
-                            } elseif ($tenant['status'] === 'cancelled') {
-                                $status = ['label' => t('cancelled'), 'class' => 'dark'];
-                            } elseif (empty($tenant['status'])) {
-                                if ($tenant['check_in_date'] == date('Y-m-d')) {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th><?php echo t('room'); ?></th>
+                                <th><?php echo t('name'); ?></th>
+                                <th><?php echo t('check_in'); ?></th>
+                                <th><?php echo t('status'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($recentDailyTenants as $tenant):
+                                // Mirror the same status rules used on daily-tenants/index.php.
+                                if ($tenant['status'] === 'checked_out') {
+                                    $status = ['label' => t('checked_out'), 'class' => 'secondary'];
+                                } elseif ($tenant['status'] === 'cancelled') {
+                                    $status = ['label' => t('cancelled'), 'class' => 'dark'];
+                                } elseif (empty($tenant['status'])) {
+                                    if ($tenant['check_in_date'] == date('Y-m-d')) {
+                                        $status = ['label' => t('check_in_today'), 'class' => 'warning'];
+                                    } elseif ($tenant['check_in_date'] > date('Y-m-d')) {
+                                        $status = ['label' => t('reserved'), 'class' => 'info'];
+                                    } else {
+                                        $status = ['label' => t('past_checkin_date'), 'class' => 'danger'];
+                                    }
+                                } elseif ($tenant['status'] === 'checked_in' && empty($tenant['actual_check_in_date']) && $tenant['check_in_date'] == date('Y-m-d')) {
                                     $status = ['label' => t('check_in_today'), 'class' => 'warning'];
-                                } elseif ($tenant['check_in_date'] > date('Y-m-d')) {
-                                    $status = ['label' => t('reserved'), 'class' => 'info'];
-                                } else {
+                                } elseif ($tenant['status'] === 'checked_in' && empty($tenant['actual_check_in_date']) && $tenant['check_in_date'] > date('Y-m-d')) {
+                                    $status = ['label' => t('upcoming'), 'class' => 'info'];
+                                } elseif ($tenant['status'] === 'checked_in' && empty($tenant['actual_check_in_date']) && $tenant['check_in_date'] < date('Y-m-d')) {
                                     $status = ['label' => t('past_checkin_date'), 'class' => 'danger'];
+                                } elseif ($tenant['status'] === 'checked_in' && !empty($tenant['actual_check_in_date']) && $tenant['check_out_date'] == date('Y-m-d') && empty($tenant['actual_check_out_date'])) {
+                                    $status = ['label' => t('checkout_today'), 'class' => 'warning'];
+                                } elseif ($tenant['status'] === 'checked_in' && !empty($tenant['actual_check_in_date']) && $tenant['check_out_date'] < date('Y-m-d') && empty($tenant['actual_check_out_date'])) {
+                                    $status = ['label' => t('overdue_checkout'), 'class' => 'danger'];
+                                } else {
+                                    $status = ['label' => t('checked_in'), 'class' => 'success'];
                                 }
-                            } elseif ($tenant['status'] === 'checked_in' && empty($tenant['actual_check_in_date']) && $tenant['check_in_date'] == date('Y-m-d')) {
-                                $status = ['label' => t('check_in_today'), 'class' => 'warning'];
-                            } elseif ($tenant['status'] === 'checked_in' && empty($tenant['actual_check_in_date']) && $tenant['check_in_date'] > date('Y-m-d')) {
-                                $status = ['label' => t('upcoming'), 'class' => 'info'];
-                            } elseif ($tenant['status'] === 'checked_in' && empty($tenant['actual_check_in_date']) && $tenant['check_in_date'] < date('Y-m-d')) {
-                                $status = ['label' => t('past_checkin_date'), 'class' => 'danger'];
-                            } elseif ($tenant['status'] === 'checked_in' && !empty($tenant['actual_check_in_date']) && $tenant['check_out_date'] == date('Y-m-d') && empty($tenant['actual_check_out_date'])) {
-                                $status = ['label' => t('checkout_today'), 'class' => 'warning'];
-                            } elseif ($tenant['status'] === 'checked_in' && !empty($tenant['actual_check_in_date']) && $tenant['check_out_date'] < date('Y-m-d') && empty($tenant['actual_check_out_date'])) {
-                                $status = ['label' => t('overdue_checkout'), 'class' => 'danger'];
-                            } else {
-                                $status = ['label' => t('checked_in'), 'class' => 'success'];
-                            }
-                        ?>
-                            <tr>
-                                <td><?php echo $tenant['room_number']; ?> (<?php echo $tenant['type_name']; ?>)</td>
-                                <td><?php echo $tenant['guest_name']; ?></td>
-                                <td><?php echo formatDate($tenant['check_in_date']); ?></td>
-                                <td><span class="badge bg-<?php echo $status['class']; ?>"><?php echo $status['label']; ?></span></td>
-                            </tr>
-                        <?php endforeach; ?>
-                        <?php if (empty($recentDailyTenants)): ?>
-                            <tr>
-                                <td colspan="4" class="text-center py-3 text-muted"><?php echo t('no_data'); ?></td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+                            ?>
+                                <tr>
+                                    <td><?php echo $tenant['room_number']; ?> (<?php echo $tenant['type_name']; ?>)</td>
+                                    <td><?php echo $tenant['guest_name']; ?></td>
+                                    <td><?php echo formatDate($tenant['check_in_date']); ?></td>
+                                    <td><span class="badge bg-<?php echo $status['class']; ?>"><?php echo $status['label']; ?></span></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            <?php if (empty($recentDailyTenants)): ?>
+                                <tr>
+                                    <td colspan="4" class="text-center py-3 text-muted"><?php echo t('no_data'); ?></td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -425,39 +431,41 @@ include __DIR__ . '/../includes/header.php';
                 <a href="monthly-tenants/index.php" class="btn btn-sm btn-primary"><?php echo t('view_all'); ?></a>
             </div>
             <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th><?php echo t('room'); ?></th>
-                            <th><?php echo t('name'); ?></th>
-                            <th><?php echo t('contract_end'); ?></th>
-                            <th><?php echo t('status'); ?></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($recentMonthlyTenants as $tenant):
-                            $status = calculateMonthlyStatus($tenant['contract_start'], $tenant['contract_end']);
-                        ?>
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
                             <tr>
-                                <td><?php echo $tenant['room_number']; ?></td>
-                                <td><?php echo $tenant['tenant_name']; ?></td>
-                                <td><?php echo formatDate($tenant['contract_end']); ?></td>
-                                <td>
-                                    <?php if ($tenant['status'] === 'terminated' && date('Y-m', strtotime($tenant['updated_at'])) === date('Y-m')): ?>
-                                    <span class="badge bg-secondary"><?php echo t('contract_terminated'); ?></span>
-                                    <?php else: ?>
-                                    <span class="badge bg-<?php echo $status['class']; ?>"><?php echo $status['label']; ?></span>
-                                    <?php endif; ?>
-                                </td>
+                                <th><?php echo t('room'); ?></th>
+                                <th><?php echo t('name'); ?></th>
+                                <th><?php echo t('contract_end'); ?></th>
+                                <th><?php echo t('status'); ?></th>
                             </tr>
-                        <?php endforeach; ?>
-                        <?php if (empty($recentMonthlyTenants)): ?>
-                            <tr>
-                                <td colspan="4" class="text-center py-3 text-muted"><?php echo t('no_data'); ?></td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($recentMonthlyTenants as $tenant):
+                                $status = calculateMonthlyStatus($tenant['contract_start'], $tenant['contract_end']);
+                            ?>
+                                <tr>
+                                    <td><?php echo $tenant['room_number']; ?></td>
+                                    <td><?php echo $tenant['tenant_name']; ?></td>
+                                    <td><?php echo formatDate($tenant['contract_end']); ?></td>
+                                    <td>
+                                        <?php if ($tenant['status'] === 'terminated' && date('Y-m', strtotime($tenant['updated_at'])) === date('Y-m')): ?>
+                                        <span class="badge bg-secondary"><?php echo t('contract_terminated'); ?></span>
+                                        <?php else: ?>
+                                        <span class="badge bg-<?php echo $status['class']; ?>"><?php echo $status['label']; ?></span>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            <?php if (empty($recentMonthlyTenants)): ?>
+                                <tr>
+                                    <td colspan="4" class="text-center py-3 text-muted"><?php echo t('no_data'); ?></td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

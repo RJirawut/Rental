@@ -161,6 +161,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
         .card-header-theme { background-color: <?php echo htmlspecialchars($primaryColor); ?>; color: #fff; }
         .card-border-theme { border-color: <?php echo htmlspecialchars($primaryColor); ?>; }
         .badge-theme { background-color: <?php echo htmlspecialchars($primaryColor); ?>; color: #fff; }
+        @media (max-width: 576px) {
+            .form-container { margin: 0.5rem auto !important; padding: 0 0.5rem !important; }
+            .header-bg { padding: 1.5rem 1rem 2.25rem !important; border-radius: 14px 14px 0 0 !important; }
+            .form-card { margin-top: -1.5rem !important; padding: 1.25rem 0.85rem !important; border-radius: 14px !important; }
+            .form-control, .form-select { font-size: 16px !important; }
+        }
     </style>
 </head>
 <body>

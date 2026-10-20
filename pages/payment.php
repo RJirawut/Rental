@@ -240,6 +240,15 @@ $paymentHeading = $billType === 'daily'
         .tracking-code-block { background: transparent; border: 0; box-shadow: none; padding: 0; margin: 1rem 0; }
         .tracking-code-block .tracking-code-value { display: block; }
         .tracking-code-block .tracking-actions { display: block; margin-top: .5rem; }
+        @media (max-width: 576px) {
+            .payment-container { margin: 0.5rem auto !important; padding: 0 0.5rem !important; }
+            .header-bg { padding: 1.5rem 1rem 2.25rem !important; border-radius: 14px 14px 0 0 !important; }
+            .payment-card { margin-top: -1.5rem !important; padding: 1.25rem 0.85rem !important; border-radius: 14px !important; }
+            .qr-box { padding: 1rem 0.5rem !important; }
+            .qr-image { max-width: 190px !important; }
+            .bill-details { padding: 0.85rem !important; }
+            .form-control, .form-select { font-size: 16px !important; }
+        }
     </style>
 </head>
 <body>

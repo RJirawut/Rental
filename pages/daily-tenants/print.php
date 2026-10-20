@@ -162,9 +162,18 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, 'daily');
         .qr-image-slot img { width: 80px; height: 80px; background-color: #fff; padding: 8px; border-radius: 8px; box-sizing: border-box; }
         .qr-payment-details { margin-top: 8px; }
         .qr-card-caption { min-height: 32px; margin-top: 8px !important; color: #718096; font-size: 12px; line-height: 1.4; }
+        @media screen and (max-width: 576px) {
+            body { padding: 12px 6px; }
+            .container { padding-left: 8px; padding-right: 8px; }
+            .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .table-responsive .table { min-width: 480px; font-size: 13px; }
+            .qr-code-grid > [class*="col-"] { flex: 0 0 100%; max-width: 100%; margin-bottom: 12px; }
+        }
         @media print {
             .no-print { display: none; }
             body { margin: 0; padding: 20px; }
+            .table-responsive { overflow: visible !important; }
+            .table-responsive .table { min-width: 100% !important; font-size: inherit; }
         }
     </style>
 </head>
@@ -222,70 +231,72 @@ $paymentInstruction = buildPaymentInstructionText($settings, $lang, 'daily');
             </div>
         </div>
         
+        <div class="table-responsive">
         <table class="table table-bordered">
             <thead class="table-light">
                 <tr>
                     <th><?php echo t('invoice_item'); ?></th>
-                    <th class="text-center"><?php echo t('invoice_qty'); ?></th>
-                    <th class="text-end"><?php echo t('invoice_price'); ?></th>
-                    <th class="text-end"><?php echo t('invoice_amount'); ?></th>
+                    <th class="text-center text-nowrap"><?php echo t('invoice_qty'); ?></th>
+                    <th class="text-end text-nowrap"><?php echo t('invoice_price'); ?></th>
+                    <th class="text-end text-nowrap"><?php echo t('invoice_amount'); ?></th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
                     <td><?php echo $roomDescription; ?></td>
-                    <td class="text-center"><?php echo $baseDays; ?> <?php echo t('invoice_days_unit'); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($tenant['daily_rate']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($roomAmount); ?></td>
+                    <td class="text-center text-nowrap"><?php echo $baseDays; ?> <?php echo t('invoice_days_unit'); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($tenant['daily_rate']); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($roomAmount); ?></td>
                 </tr>
                 <?php if ($otherFees > 0): ?>
                 <tr>
                     <td><?php echo t('other_fees'); ?></td>
-                    <td class="text-center">1</td>
-                    <td class="text-end"><?php echo formatCurrency($otherFees); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($otherFees); ?></td>
+                    <td class="text-center text-nowrap">1</td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($otherFees); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($otherFees); ?></td>
                 </tr>
                 <?php endif; ?>
                 <?php if ($earlyCheckinDays > 0): ?>
                 <tr>
                     <td><?php echo t('invoice_early_checkin_charge'); ?></td>
-                    <td class="text-center"><?php echo $earlyCheckinDays; ?> <?php echo t('invoice_days_unit'); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($tenant['daily_rate']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($earlyCheckinCharge); ?></td>
+                    <td class="text-center text-nowrap"><?php echo $earlyCheckinDays; ?> <?php echo t('invoice_days_unit'); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($tenant['daily_rate']); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($earlyCheckinCharge); ?></td>
                 </tr>
                 <?php endif; ?>
                 <?php if ($lateCheckoutDays > 0): ?>
                 <tr>
                     <td><?php echo t('invoice_late_checkout_charge'); ?></td>
-                    <td class="text-center"><?php echo $lateCheckoutDays; ?> <?php echo t('invoice_days_unit'); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($tenant['daily_rate']); ?></td>
-                    <td class="text-end"><?php echo formatCurrency($lateCheckoutCharge); ?></td>
+                    <td class="text-center text-nowrap"><?php echo $lateCheckoutDays; ?> <?php echo t('invoice_days_unit'); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($tenant['daily_rate']); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($lateCheckoutCharge); ?></td>
                 </tr>
                 <?php endif; ?>
             </tbody>
             <tfoot>
                 <tr>
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_subtotal'); ?></strong></td>
-                    <td class="text-end"><?php echo formatCurrency($subtotal); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($subtotal); ?></td>
                 </tr>
                 <?php if ($hasTaxId): ?>
                 <tr>
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_vat'); ?> <?php echo $vatRate; ?>%</strong></td>
-                    <td class="text-end"><?php echo formatCurrency($vatAmount); ?></td>
+                    <td class="text-end text-nowrap"><?php echo formatCurrency($vatAmount); ?></td>
                 </tr>
                 <?php endif; ?>
                 <?php if ($invoice && $invoice['discount'] > 0): ?>
                 <tr>
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_discount'); ?></strong></td>
-                    <td class="text-end text-danger">-<?php echo formatCurrency($invoice['discount']); ?></td>
+                    <td class="text-end text-danger text-nowrap">-<?php echo formatCurrency($invoice['discount']); ?></td>
                 </tr>
                 <?php endif; ?>
                 <tr class="table-primary">
                     <td colspan="3" class="text-end"><strong><?php echo t('invoice_grand_total'); ?></strong></td>
-                    <td class="text-end"><strong><?php echo formatCurrency($grandTotal); ?></strong></td>
+                    <td class="text-end text-nowrap"><strong><?php echo formatCurrency($grandTotal); ?></strong></td>
                 </tr>
             </tfoot>
         </table>
+        </div>
 
         <!-- QR Codes Section -->
         <?php
